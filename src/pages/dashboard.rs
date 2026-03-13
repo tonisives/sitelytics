@@ -228,8 +228,8 @@ fn DashboardContent(
                         <th class="num-cell">"CTR"</th>
                         <th class="num-cell">"Position"</th>
                         <th class="num-cell ga-col">"Sessions"</th>
-                        <th class="sparkline-header">"Trend"</th>
-                        <th class="sparkline-header ga-col">"GA Trend"</th>
+                        <th class="sparkline-header">"Impressions"</th>
+                        <th class="sparkline-header ga-col">"Sessions"</th>
                     </tr>
                 </thead>
                 <tbody>
