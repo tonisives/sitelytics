@@ -481,11 +481,6 @@ fn DetailChart(
     let (show_ctr, set_show_ctr) = signal(false);
     let (show_position, set_show_position) = signal(false);
 
-    let clicks_max_label = format_axis_number(clicks_max);
-    let clicks_mid_label = format_axis_number(clicks_max / 2.0);
-    let impressions_max_label = format_axis_number(impressions_max);
-    let impressions_mid_label = format_axis_number(impressions_max / 2.0);
-
     let daily_stored = StoredValue::new(daily);
     let tooltip_content = move || {
         let idx = hover_idx.get()?;
@@ -543,159 +538,323 @@ fn DetailChart(
                 show_position=show_position set_show_position=set_show_position
                 ga_metric=ga_metric set_ga_metric=set_ga_metric
             />
-
-            <div class="chart-axis-labels">
-                <span class="axis-title color-green" style:display=move || if show_clicks.get() { "block" } else { "none" }>"Clicks"</span>
-                <span class="axis-title-spacer"></span>
-                <span class="axis-title color-accent" style:display=move || if show_impressions.get() { "block" } else { "none" }>"Impressions"</span>
-            </div>
-
-            <div class="chart-container">
-                <div class="chart-axis chart-axis-left"
-                    style:visibility=move || if show_clicks.get() { "visible" } else { "hidden" }
-                >
-                    <span class="axis-label color-green">{clicks_max_label}</span>
-                    <span class="axis-label color-green">{clicks_mid_label}</span>
-                    <span class="axis-label color-green">"0"</span>
-                </div>
-
-                <div class="chart-area"
-                    node_ref=chart_ref
-                    on:mousemove=handle_mouse_move
-                    on:mouseleave=handle_mouse_leave
-                >
-                    <svg class="full-chart" viewBox="0 0 800 200" preserveAspectRatio="none">
-                        <line x1="0" y1="10" x2="800" y2="10" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
-                        <line x1="0" y1="100" x2="800" y2="100" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
-                        <line x1="0" y1="190" x2="800" y2="190" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
-
-                        {lines.iter().zip(gsc_paths.iter()).map(|(c, path_memo)| {
-                            let color_stroke = c.color.to_string();
-                            let color_fill = c.color.to_string();
-                            let path_memo = *path_memo;
-                            let n = c.y_pcts.len();
-                            let key = c.key;
-                            let is_visible = move || match key {
-                                "clicks" => show_clicks.get(),
-                                "impressions" => show_impressions.get(),
-                                "ctr" => show_ctr.get(),
-                                "position" => show_position.get(),
-                                _ => false,
-                            };
-                            let fill_close = move || {
-                                let total = num_days.get();
-                                let last_x = if total > 1 && n > 0 {
-                                    (n - 1) as f64 / (total - 1) as f64 * 800.0
-                                } else {
-                                    0.0
-                                };
-                                format!("{} L{last_x:.1},200 L0,200 Z", path_memo.get())
-                            };
-                            view! {
-                                <g style:display=move || if is_visible() { "block" } else { "none" }>
-                                    <path d=fill_close fill={color_fill} opacity="0.08"/>
-                                    <path d=move || path_memo.get() fill="none" stroke={color_stroke} stroke-width="2"
-                                        style="vector-effect: non-scaling-stroke"/>
-                                </g>
-                            }
-                        }).collect::<Vec<_>>()}
-
-                        {move || {
-                            if !show_ga() { return None; }
-                            let (ref path, _, _, _) = ga_chart.get()?;
-                            let color = ga_color();
-                            let fill_path = format!("{path} L800,200 L0,200 Z");
-                            let path = path.clone();
-                            let color2 = color.clone();
-                            Some(view! {
-                                <g>
-                                    <path d={fill_path} fill={color} opacity="0.08"/>
-                                    <path d={path} fill="none" stroke={color2} stroke-width="2"
-                                        style="vector-effect: non-scaling-stroke"/>
-                                </g>
-                            })
-                        }}
-                    </svg>
-
-                    <div class="chart-crosshair"
-                        style:display=move || if hover_idx.get().is_some() { "block" } else { "none" }
-                        style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
-                    ></div>
-
-                    {lines.iter().map(|line| {
-                        let y_pcts = line.y_pcts.clone();
-                        let color = line.color.to_string();
-                        let key = line.key;
-                        let is_visible = move || match key {
-                            "clicks" => show_clicks.get(),
-                            "impressions" => show_impressions.get(),
-                            "ctr" => show_ctr.get(),
-                            "position" => show_position.get(),
-                            _ => false,
-                        };
-                        view! {
-                            <div
-                                class="chart-dot"
-                                style:display=move || {
-                                    let idx = hover_idx.get();
-                                    let in_gsc_range = idx.is_some_and(|i| i < gsc_line_count);
-                                    if in_gsc_range && is_visible() { "block" } else { "none" }
-                                }
-                                style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
-                                style:top=move || {
-                                    let idx = hover_idx.get().unwrap_or(0);
-                                    let y = y_pcts.get(idx).copied().unwrap_or(0.5);
-                                    format!("{}%", (1.0 - y) * 100.0)
-                                }
-                                style:background=color
-                            ></div>
-                        }
-                    }).collect::<Vec<_>>()}
-
-                    <div
-                        class="chart-dot"
-                        style:display=move || {
-                            if hover_idx.get().is_some() && show_ga() && ga_chart.get().is_some() {
-                                "block"
-                            } else {
-                                "none"
-                            }
-                        }
-                        style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
-                        style:top=move || {
-                            let idx = hover_idx.get().unwrap_or(0);
-                            let y = ga_chart.get()
-                                .and_then(|(_, _, ref y_pcts, _)| y_pcts.get(idx).copied())
-                                .unwrap_or(0.5);
-                            format!("{}%", (1.0 - y) * 100.0)
-                        }
-                        style:background=ga_color
-                    ></div>
-
-                    <ChartTooltip
-                        tooltip_content=tooltip_content
-                        crosshair_pct=crosshair_pct
-                        show_clicks=show_clicks
-                        show_impressions=show_impressions
-                        show_ctr=show_ctr
-                        show_position=show_position
-                        show_ga=show_ga
-                        ga_chart=ga_chart
-                        ga_metric=ga_metric
-                        ga_color=ga_color
-                        hover_idx=hover_idx
-                    />
-                </div>
-
-                <div class="chart-axis chart-axis-right"
-                    style:visibility=move || if show_impressions.get() { "visible" } else { "hidden" }
-                >
-                    <span class="axis-label color-accent">{impressions_max_label}</span>
-                    <span class="axis-label color-accent">{impressions_mid_label}</span>
-                    <span class="axis-label color-accent">"0"</span>
-                </div>
-            </div>
+            <ChartBody
+                lines=lines
+                gsc_paths=gsc_paths
+                gsc_line_count=gsc_line_count
+                num_days=num_days
+                ga_chart=ga_chart
+                show_ga=show_ga
+                ga_color=ga_color
+                ga_metric=ga_metric
+                clicks_max=clicks_max
+                impressions_max=impressions_max
+                show_clicks=show_clicks
+                show_impressions=show_impressions
+                show_ctr=show_ctr
+                show_position=show_position
+                hover_idx=hover_idx
+                crosshair_pct=crosshair_pct
+                tooltip_content=tooltip_content
+                chart_ref=chart_ref
+                handle_mouse_move=handle_mouse_move
+                handle_mouse_leave=handle_mouse_leave
+            />
         </div>
+    }
+}
+
+#[component]
+fn ChartBody(
+    lines: Vec<ChartLine>,
+    gsc_paths: Vec<Memo<String>>,
+    gsc_line_count: usize,
+    num_days: Memo<usize>,
+    ga_chart: Memo<Option<(String, f64, Vec<f64>, Vec<f64>)>>,
+    show_ga: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    ga_color: impl Fn() -> String + Copy + Send + Sync + 'static,
+    ga_metric: ReadSignal<Option<String>>,
+    clicks_max: f64,
+    impressions_max: f64,
+    show_clicks: ReadSignal<bool>,
+    show_impressions: ReadSignal<bool>,
+    show_ctr: ReadSignal<bool>,
+    show_position: ReadSignal<bool>,
+    hover_idx: ReadSignal<Option<usize>>,
+    crosshair_pct: impl Fn() -> Option<f64> + Copy + Send + Sync + 'static,
+    tooltip_content: impl Fn() -> Option<(String, Option<f64>, Option<f64>, Option<f64>, Option<f64>)> + Copy + Send + Sync + 'static,
+    chart_ref: NodeRef<leptos::html::Div>,
+    handle_mouse_move: impl FnMut(leptos::ev::MouseEvent) + 'static,
+    handle_mouse_leave: impl FnMut(leptos::ev::MouseEvent) + 'static,
+) -> impl IntoView {
+    let clicks_max_label = format_axis_number(clicks_max);
+    let clicks_mid_label = format_axis_number(clicks_max / 2.0);
+    let impressions_max_label = format_axis_number(impressions_max);
+    let impressions_mid_label = format_axis_number(impressions_max / 2.0);
+
+    // Extract y_pcts before lines is moved to ChartSvg
+    let line_data: Vec<(&'static str, String, Vec<f64>)> = lines
+        .iter()
+        .map(|l| (l.key, l.color.to_string(), l.y_pcts.clone()))
+        .collect();
+
+    view! {
+        <ChartAxisLabels show_clicks=show_clicks show_impressions=show_impressions/>
+        <div class="chart-container">
+            <ChartLeftAxis
+                show_clicks=show_clicks
+                clicks_max_label=clicks_max_label
+                clicks_mid_label=clicks_mid_label
+            />
+
+            <div class="chart-area"
+                node_ref=chart_ref
+                on:mousemove=handle_mouse_move
+                on:mouseleave=handle_mouse_leave
+            >
+                <ChartSvg
+                    lines=lines
+                    gsc_paths=gsc_paths
+                    num_days=num_days
+                    ga_chart=ga_chart
+                    show_ga=show_ga
+                    ga_color=ga_color
+                    show_clicks=show_clicks
+                    show_impressions=show_impressions
+                    show_ctr=show_ctr
+                    show_position=show_position
+                />
+
+                <div class="chart-crosshair"
+                    style:display=move || if hover_idx.get().is_some() { "block" } else { "none" }
+                    style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
+                ></div>
+
+                {line_data.into_iter().map(|(key, color, y_pcts)| {
+                    let is_visible = move || match key {
+                        "clicks" => show_clicks.get(),
+                        "impressions" => show_impressions.get(),
+                        "ctr" => show_ctr.get(),
+                        "position" => show_position.get(),
+                        _ => false,
+                    };
+                    view! {
+                        <GscDot
+                            y_pcts=y_pcts
+                            color=color
+                            is_visible=is_visible
+                            gsc_line_count=gsc_line_count
+                            hover_idx=hover_idx
+                            crosshair_pct=crosshair_pct
+                        />
+                    }
+                }).collect::<Vec<_>>()}
+
+                <GaDot
+                    hover_idx=hover_idx
+                    crosshair_pct=crosshair_pct
+                    show_ga=show_ga
+                    ga_chart=ga_chart
+                    ga_color=ga_color
+                />
+
+                <ChartTooltip
+                    tooltip_content=tooltip_content
+                    crosshair_pct=crosshair_pct
+                    show_clicks=show_clicks
+                    show_impressions=show_impressions
+                    show_ctr=show_ctr
+                    show_position=show_position
+                    show_ga=show_ga
+                    ga_chart=ga_chart
+                    ga_metric=ga_metric
+                    ga_color=ga_color
+                    hover_idx=hover_idx
+                />
+            </div>
+
+            <ChartRightAxis
+                show_impressions=show_impressions
+                impressions_max_label=impressions_max_label
+                impressions_mid_label=impressions_mid_label
+            />
+        </div>
+    }
+}
+
+#[component]
+fn ChartLeftAxis(
+    show_clicks: ReadSignal<bool>,
+    clicks_max_label: String,
+    clicks_mid_label: String,
+) -> impl IntoView {
+    view! {
+        <div class="chart-axis chart-axis-left"
+            style:visibility=move || if show_clicks.get() { "visible" } else { "hidden" }
+        >
+            <span class="axis-label color-green">{clicks_max_label}</span>
+            <span class="axis-label color-green">{clicks_mid_label}</span>
+            <span class="axis-label color-green">"0"</span>
+        </div>
+    }
+}
+
+#[component]
+fn ChartRightAxis(
+    show_impressions: ReadSignal<bool>,
+    impressions_max_label: String,
+    impressions_mid_label: String,
+) -> impl IntoView {
+    view! {
+        <div class="chart-axis chart-axis-right"
+            style:visibility=move || if show_impressions.get() { "visible" } else { "hidden" }
+        >
+            <span class="axis-label color-accent">{impressions_max_label}</span>
+            <span class="axis-label color-accent">{impressions_mid_label}</span>
+            <span class="axis-label color-accent">"0"</span>
+        </div>
+    }
+}
+
+#[component]
+fn GscDot(
+    y_pcts: Vec<f64>,
+    color: String,
+    is_visible: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    gsc_line_count: usize,
+    hover_idx: ReadSignal<Option<usize>>,
+    crosshair_pct: impl Fn() -> Option<f64> + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    view! {
+        <div
+            class="chart-dot"
+            style:display=move || {
+                let idx = hover_idx.get();
+                let in_gsc_range = idx.is_some_and(|i| i < gsc_line_count);
+                if in_gsc_range && is_visible() { "block" } else { "none" }
+            }
+            style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
+            style:top=move || {
+                let idx = hover_idx.get().unwrap_or(0);
+                let y = y_pcts.get(idx).copied().unwrap_or(0.5);
+                format!("{}%", (1.0 - y) * 100.0)
+            }
+            style:background=color
+        ></div>
+    }
+}
+
+#[component]
+fn ChartAxisLabels(
+    show_clicks: ReadSignal<bool>,
+    show_impressions: ReadSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="chart-axis-labels">
+            <span class="axis-title color-green" style:display=move || if show_clicks.get() { "block" } else { "none" }>"Clicks"</span>
+            <span class="axis-title-spacer"></span>
+            <span class="axis-title color-accent" style:display=move || if show_impressions.get() { "block" } else { "none" }>"Impressions"</span>
+        </div>
+    }
+}
+
+#[component]
+fn ChartSvg(
+    lines: Vec<ChartLine>,
+    gsc_paths: Vec<Memo<String>>,
+    num_days: Memo<usize>,
+    ga_chart: Memo<Option<(String, f64, Vec<f64>, Vec<f64>)>>,
+    show_ga: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    ga_color: impl Fn() -> String + Copy + Send + Sync + 'static,
+    show_clicks: ReadSignal<bool>,
+    show_impressions: ReadSignal<bool>,
+    show_ctr: ReadSignal<bool>,
+    show_position: ReadSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <svg class="full-chart" viewBox="0 0 800 200" preserveAspectRatio="none">
+            <line x1="0" y1="10" x2="800" y2="10" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
+            <line x1="0" y1="100" x2="800" y2="100" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
+            <line x1="0" y1="190" x2="800" y2="190" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
+
+            {lines.iter().zip(gsc_paths.iter()).map(|(c, path_memo)| {
+                let color_stroke = c.color.to_string();
+                let color_fill = c.color.to_string();
+                let path_memo = *path_memo;
+                let n = c.y_pcts.len();
+                let key = c.key;
+                let is_visible = move || match key {
+                    "clicks" => show_clicks.get(),
+                    "impressions" => show_impressions.get(),
+                    "ctr" => show_ctr.get(),
+                    "position" => show_position.get(),
+                    _ => false,
+                };
+                let fill_close = move || {
+                    let total = num_days.get();
+                    let last_x = if total > 1 && n > 0 {
+                        (n - 1) as f64 / (total - 1) as f64 * 800.0
+                    } else {
+                        0.0
+                    };
+                    format!("{} L{last_x:.1},200 L0,200 Z", path_memo.get())
+                };
+                view! {
+                    <g style:display=move || if is_visible() { "block" } else { "none" }>
+                        <path d=fill_close fill={color_fill} opacity="0.08"/>
+                        <path d=move || path_memo.get() fill="none" stroke={color_stroke} stroke-width="2"
+                            style="vector-effect: non-scaling-stroke"/>
+                    </g>
+                }
+            }).collect::<Vec<_>>()}
+
+            {move || {
+                if !show_ga() { return None; }
+                let (ref path, _, _, _) = ga_chart.get()?;
+                let color = ga_color();
+                let fill_path = format!("{path} L800,200 L0,200 Z");
+                let path = path.clone();
+                let color2 = color.clone();
+                Some(view! {
+                    <g>
+                        <path d={fill_path} fill={color} opacity="0.08"/>
+                        <path d={path} fill="none" stroke={color2} stroke-width="2"
+                            style="vector-effect: non-scaling-stroke"/>
+                    </g>
+                })
+            }}
+        </svg>
+    }
+}
+
+#[component]
+fn GaDot(
+    hover_idx: ReadSignal<Option<usize>>,
+    crosshair_pct: impl Fn() -> Option<f64> + Copy + Send + Sync + 'static,
+    show_ga: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    ga_chart: Memo<Option<(String, f64, Vec<f64>, Vec<f64>)>>,
+    ga_color: impl Fn() -> String + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    view! {
+        <div
+            class="chart-dot"
+            style:display=move || {
+                if hover_idx.get().is_some() && show_ga() && ga_chart.get().is_some() {
+                    "block"
+                } else {
+                    "none"
+                }
+            }
+            style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
+            style:top=move || {
+                let idx = hover_idx.get().unwrap_or(0);
+                let y = ga_chart.get()
+                    .and_then(|(_, _, ref y_pcts, _)| y_pcts.get(idx).copied())
+                    .unwrap_or(0.5);
+                format!("{}%", (1.0 - y) * 100.0)
+            }
+            style:background=ga_color
+        ></div>
     }
 }
 

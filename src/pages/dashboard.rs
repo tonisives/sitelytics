@@ -88,7 +88,6 @@ pub fn DashboardPage() -> impl IntoView {
     let data = Resource::new(
         move || days.get(),
         move |d| {
-            // If cache matches, return cached data without fetching
             let cached = cache.get_untracked();
             async move {
                 if let Some((cached_days, cached_data)) = cached {
@@ -101,13 +100,32 @@ pub fn DashboardPage() -> impl IntoView {
         },
     );
 
-    // Write results to cache
     Effect::new(move || {
         if let Some(Ok(d)) = data.get() {
             cache.set(Some((days.get_untracked(), d)));
         }
     });
 
+    let ga_cache = expect_context::<DashboardGaCache>();
+
+    view! {
+        <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
+            {move || data.get().map(|result| match result {
+                Err(e) if is_auth_error(&e) => view! { <LoginPage/> }.into_any(),
+                Ok(d) => view! { <DashboardShell data=d days=days set_days=set_days ga_cache=ga_cache/> }.into_any(),
+                Err(e) => view! { <div class="container"><div class="error-text">{e.to_string()}</div></div> }.into_any(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn DashboardShell(
+    data: DashboardData,
+    days: ReadSignal<u64>,
+    set_days: WriteSignal<u64>,
+    ga_cache: DashboardGaCache,
+) -> impl IntoView {
     let handle_logout = move |_| {
         leptos::task::spawn_local(async move {
             let _ = logout().await;
@@ -115,36 +133,21 @@ pub fn DashboardPage() -> impl IntoView {
         });
     };
 
-    // GA sessions - app-level cache, keyed by days
-    let ga_cache = expect_context::<DashboardGaCache>();
-
     view! {
-        <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
-            {move || data.get().map(|result| match result {
-                Err(e) if is_auth_error(&e) => view! { <LoginPage/> }.into_any(),
-                Ok(d) => view! {
-                    <div class="container">
-                        <header class="dash-header">
-                            <h1>"Sitelytics"</h1>
-                            <div class="dash-controls">
-                                <div class="day-buttons">
-                                    <DayButton days=days set_days=set_days value=7/>
-                                    <DayButton days=days set_days=set_days value=28/>
-                                    <DayButton days=days set_days=set_days value=90/>
-                                </div>
-                                <button class="logout-btn" on:click=handle_logout>"Sign out"</button>
-                            </div>
-                        </header>
-                        <DashboardContent data=d days=days.get() ga_cache=ga_cache/>
+        <div class="container">
+            <header class="dash-header">
+                <h1>"Sitelytics"</h1>
+                <div class="dash-controls">
+                    <div class="day-buttons">
+                        <DayButton days=days set_days=set_days value=7/>
+                        <DayButton days=days set_days=set_days value=28/>
+                        <DayButton days=days set_days=set_days value=90/>
                     </div>
-                }.into_any(),
-                Err(e) => view! {
-                    <div class="container">
-                        <div class="error-text">{e.to_string()}</div>
-                    </div>
-                }.into_any(),
-            })}
-        </Suspense>
+                    <button class="logout-btn" on:click=handle_logout>"Sign out"</button>
+                </div>
+            </header>
+            <DashboardContent data=data days=days.get() ga_cache=ga_cache/>
+        </div>
     }
 }
 
