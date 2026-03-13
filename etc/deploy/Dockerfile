@@ -5,8 +5,20 @@ RUN rustup target add wasm32-unknown-unknown
 RUN cargo install cargo-leptos
 
 WORKDIR /app
-COPY . .
 
+# Copy dependency manifests first to cache dep compilation
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY style/main.css style/main.css
+
+# Create dummy sources for dep caching
+RUN mkdir src && \
+    echo 'fn main() {}' > src/main.rs && \
+    echo '' > src/lib.rs
+RUN cargo leptos build --release 2>/dev/null; exit 0
+
+# Copy real source and rebuild
+COPY . .
+RUN touch src/main.rs src/lib.rs
 RUN cargo leptos build --release
 
 FROM debian:bookworm-slim
