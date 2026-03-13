@@ -278,11 +278,6 @@ fn DetailContent(
     ga_metric: ReadSignal<Option<String>>,
     set_ga_metric: WriteSignal<Option<String>>,
 ) -> impl IntoView {
-    let (show_clicks, set_show_clicks) = signal(true);
-    let (show_impressions, set_show_impressions) = signal(true);
-    let (show_ctr, set_show_ctr) = signal(false);
-    let (show_position, set_show_position) = signal(false);
-
     let show_ga = move || ga_metric.get().is_some();
     let ga_color = move || {
         let metric = ga_metric.get();
@@ -293,12 +288,9 @@ fn DetailContent(
     };
 
     let daily = prop.daily.clone();
-
-    // Compute the merged date axis: GSC dates + any extra GA dates beyond GSC range
     let gsc_dates: Vec<String> = daily.iter().map(|r| r.date.clone()).collect();
     let gsc_date_count = gsc_dates.len();
 
-    // Extra GA dates that extend beyond the GSC range (reactive, updates when GA loads)
     let gsc_dates_for_merge = gsc_dates.clone();
     let extra_ga_dates = Memo::new(move |_| -> Vec<String> {
         let Some(ref ga) = ga_data.get() else {
@@ -317,7 +309,6 @@ fn DetailContent(
         extra
     });
 
-    // Total number of days on the chart - only extend when a GA metric is visible
     let num_days = Memo::new(move |_| {
         if show_ga() {
             gsc_date_count + extra_ga_dates.get().len()
@@ -326,8 +317,6 @@ fn DetailContent(
         }
     });
 
-    // Build GSC chart lines - these only cover gsc_date_count points
-    // but are scaled to the full num_days width
     let gsc_line_count = gsc_date_count;
     let lines: Vec<ChartLine> = METRICS
         .iter()
@@ -339,16 +328,10 @@ fn DetailContent(
                 .iter()
                 .map(|v| v / safe_max * 0.9 + 0.05)
                 .collect();
-            ChartLine {
-                key: m.key,
-                color: m.color,
-                max_val,
-                y_pcts,
-            }
+            ChartLine { key: m.key, color: m.color, max_val, y_pcts }
         })
         .collect();
 
-    // Build GSC SVG paths reactively so they scale to the full date axis
     let gsc_paths: Vec<Memo<String>> = lines
         .iter()
         .map(|line| {
@@ -360,16 +343,9 @@ fn DetailContent(
         })
         .collect();
 
-    // Fixed axes: clicks on left, impressions on right
     let clicks_max = lines.iter().find(|l| l.key == "clicks").map_or(0.0, |l| l.max_val);
     let impressions_max = lines.iter().find(|l| l.key == "impressions").map_or(0.0, |l| l.max_val);
 
-    let clicks_max_label = format_axis_number(clicks_max);
-    let clicks_mid_label = format_axis_number(clicks_max / 2.0);
-    let impressions_max_label = format_axis_number(impressions_max);
-    let impressions_mid_label = format_axis_number(impressions_max / 2.0);
-
-    // Build GA sessions chart data over the full merged date axis
     let gsc_dates_for_ga = gsc_dates.clone();
     let ga_chart = Memo::new(move |_| {
         let Some(ref ga) = ga_data.get() else {
@@ -377,7 +353,6 @@ fn DetailContent(
         };
         let ga_by_date: std::collections::HashMap<&str, f64> =
             ga.daily.iter().map(|(d, s)| (d.as_str(), *s)).collect();
-        // Build values over the full merged date axis
         let extra = extra_ga_dates.get();
         let mut values: Vec<f64> = gsc_dates_for_ga
             .iter()
@@ -408,16 +383,116 @@ fn DetailContent(
         ("Avg Position", format_position(prop.position)),
     ];
 
-    // Hover state
     let (hover_idx, set_hover_idx) = signal(Option::<usize>::None);
 
-    // All dates for tooltip (reactive)
-    let daily_for_tooltip = prop.daily.clone();
+    view! {
+        <DetailStatsGrid
+            stats=stats
+            ga_total=ga_total
+            ga_data=ga_data
+            ga_metric=ga_metric
+        />
+        <DetailChart
+            lines=lines
+            gsc_paths=gsc_paths
+            gsc_line_count=gsc_line_count
+            num_days=num_days
+            ga_chart=ga_chart
+            ga_metric=ga_metric
+            set_ga_metric=set_ga_metric
+            show_ga=show_ga
+            ga_color=ga_color
+            clicks_max=clicks_max
+            impressions_max=impressions_max
+            gsc_date_count=gsc_date_count
+            extra_ga_dates=extra_ga_dates
+            daily=prop.daily
+            hover_idx=hover_idx
+            set_hover_idx=set_hover_idx
+        />
+        <DimensionTabs site_url=site_url days=days/>
+    }
+}
+
+#[component]
+fn DetailStatsGrid(
+    stats: Vec<(&'static str, String)>,
+    ga_total: Memo<Option<f64>>,
+    ga_data: RwSignal<Option<GaSessionsData>>,
+    ga_metric: ReadSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <div class="stats-grid">
+            {stats.into_iter().map(|(label, value)| view! {
+                <div class="stat-card">
+                    <div class="stat-label">{label}</div>
+                    <div class="stat-value">{value}</div>
+                </div>
+            }).collect::<Vec<_>>()}
+            <div class="stat-card">
+                <div class="stat-label">{
+                    move || {
+                        let metric = ga_metric.get();
+                        GA_METRICS.iter()
+                            .find(|(k, _, _)| Some(k.to_string()) == metric)
+                            .map_or("GA", |(_, l, _)| l)
+                            .to_string()
+                    }
+                }</div>
+                <div class="stat-value">{move || {
+                    match ga_total.get() {
+                        None => "-".to_string(),
+                        Some(total) => match ga_metric.get().as_deref() {
+                            Some("bounceRate") => format!("{:.1}%", total / ga_data.get().map_or(1.0, |g| g.daily.len() as f64) * 100.0),
+                            Some("averageSessionDuration") => {
+                                let count = ga_data.get().map_or(1.0, |g| g.daily.len() as f64);
+                                format!("{:.0}s", total / count)
+                            }
+                            _ => format_number(total),
+                        }
+                    }
+                }}</div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn DetailChart(
+    lines: Vec<ChartLine>,
+    gsc_paths: Vec<Memo<String>>,
+    gsc_line_count: usize,
+    num_days: Memo<usize>,
+    ga_chart: Memo<Option<(String, f64, Vec<f64>, Vec<f64>)>>,
+    ga_metric: ReadSignal<Option<String>>,
+    set_ga_metric: WriteSignal<Option<String>>,
+    show_ga: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    ga_color: impl Fn() -> String + Copy + Send + Sync + 'static,
+    clicks_max: f64,
+    impressions_max: f64,
+    gsc_date_count: usize,
+    extra_ga_dates: Memo<Vec<String>>,
+    daily: Vec<DailyRow>,
+    hover_idx: ReadSignal<Option<usize>>,
+    set_hover_idx: WriteSignal<Option<usize>>,
+) -> impl IntoView {
+    let (show_clicks, set_show_clicks) = signal(true);
+    let (show_impressions, set_show_impressions) = signal(true);
+    let (show_ctr, set_show_ctr) = signal(false);
+    let (show_position, set_show_position) = signal(false);
+
+    let clicks_max_label = format_axis_number(clicks_max);
+    let clicks_mid_label = format_axis_number(clicks_max / 2.0);
+    let impressions_max_label = format_axis_number(impressions_max);
+    let impressions_mid_label = format_axis_number(impressions_max / 2.0);
+
+    let daily_stored = StoredValue::new(daily);
     let tooltip_content = move || {
         let idx = hover_idx.get()?;
         let extra = extra_ga_dates.get();
         if idx < gsc_date_count {
-            let row = daily_for_tooltip.get(idx)?;
+            let daily = daily_stored.get_value();
+            let row = daily.get(idx)?;
             Some((row.date.clone(), Some(row.clicks), Some(row.impressions), Some(row.ctr), Some(row.position)))
         } else {
             let extra_idx = idx - gsc_date_count;
@@ -452,7 +527,6 @@ fn DetailContent(
         set_hover_idx.set(None);
     };
 
-    // Crosshair X position as percentage
     let crosshair_pct = move || {
         let idx = hover_idx.get()?;
         let nd = num_days.get();
@@ -461,75 +535,14 @@ fn DetailContent(
     };
 
     view! {
-        <div class="stats-grid">
-            {stats.into_iter().map(|(label, value)| view! {
-                <div class="stat-card">
-                    <div class="stat-label">{label}</div>
-                    <div class="stat-value">{value}</div>
-                </div>
-            }).collect::<Vec<_>>()}
-            <div class="stat-card">
-                <div class="stat-label">{
-                    move || {
-                        let metric = ga_metric.get();
-                        GA_METRICS.iter()
-                            .find(|(k, _, _)| Some(k.to_string()) == metric)
-                            .map_or("GA", |(_, l, _)| l)
-                            .to_string()
-                    }
-                }</div>
-                <div class="stat-value">{move || {
-                    match ga_total.get() {
-                        None => "-".to_string(),
-                        Some(total) => match ga_metric.get().as_deref() {
-                            Some("bounceRate") => format!("{:.1}%", total / ga_data.get().map_or(1.0, |g| g.daily.len() as f64) * 100.0),
-                            Some("averageSessionDuration") => {
-                                let count = ga_data.get().map_or(1.0, |g| g.daily.len() as f64);
-                                format!("{:.0}s", total / count)
-                            }
-                            _ => format_number(total),
-                        }
-                    }
-                }}</div>
-            </div>
-        </div>
-
         <div class="chart-card">
-            <div class="chart-toggles-row">
-                <div class="chart-toggles">
-                    <MetricToggle label="Clicks" color="var(--green)" active=show_clicks set_active=set_show_clicks/>
-                    <MetricToggle label="Impressions" color="var(--accent)" active=show_impressions set_active=set_show_impressions/>
-                    <MetricToggle label="CTR" color="var(--chart-orange)" active=show_ctr set_active=set_show_ctr/>
-                    <MetricToggle label="Position" color="var(--chart-purple)" active=show_position set_active=set_show_position/>
-                </div>
-                <div class="chart-toggles ga-toggles">
-                    {GA_METRICS.iter().map(|(key, label, color)| {
-                        let key = key.to_string();
-                        let key_for_check = key.clone();
-                        let key_for_click = key.clone();
-                        let color = color.to_string();
-                        let color_c = color.clone();
-                        let key_for_bg = key.clone();
-                        view! {
-                            <button
-                                class="metric-toggle"
-                                class:metric-toggle-active=move || ga_metric.get().as_deref() == Some(&key_for_check)
-                                style:border-color=color.clone()
-                                style:background-color=move || if ga_metric.get().as_deref() == Some(&key_for_bg) { color_c.clone() } else { "transparent".into() }
-                                on:click=move |_| {
-                                    if ga_metric.get().as_deref() == Some(&key_for_click) {
-                                        set_ga_metric.set(None);
-                                    } else {
-                                        set_ga_metric.set(Some(key_for_click.clone()));
-                                    }
-                                }
-                            >
-                                {*label}
-                            </button>
-                        }
-                    }).collect::<Vec<_>>()}
-                </div>
-            </div>
+            <ChartToggles
+                show_clicks=show_clicks set_show_clicks=set_show_clicks
+                show_impressions=show_impressions set_show_impressions=set_show_impressions
+                show_ctr=show_ctr set_show_ctr=set_show_ctr
+                show_position=show_position set_show_position=set_show_position
+                ga_metric=ga_metric set_ga_metric=set_ga_metric
+            />
 
             <div class="chart-axis-labels">
                 <span class="axis-title color-green" style:display=move || if show_clicks.get() { "block" } else { "none" }>"Clicks"</span>
@@ -538,7 +551,6 @@ fn DetailContent(
             </div>
 
             <div class="chart-container">
-                // Left axis: Clicks (green)
                 <div class="chart-axis chart-axis-left"
                     style:visibility=move || if show_clicks.get() { "visible" } else { "hidden" }
                 >
@@ -553,7 +565,6 @@ fn DetailContent(
                     on:mouseleave=handle_mouse_leave
                 >
                     <svg class="full-chart" viewBox="0 0 800 200" preserveAspectRatio="none">
-                        // Grid lines
                         <line x1="0" y1="10" x2="800" y2="10" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
                         <line x1="0" y1="100" x2="800" y2="100" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
                         <line x1="0" y1="190" x2="800" y2="190" stroke="var(--border)" stroke-width="0.5" style="vector-effect: non-scaling-stroke"/>
@@ -571,7 +582,6 @@ fn DetailContent(
                                 "position" => show_position.get(),
                                 _ => false,
                             };
-                            // Close fill at last GSC data point, not at x=800
                             let fill_close = move || {
                                 let total = num_days.get();
                                 let last_x = if total > 1 && n > 0 {
@@ -590,7 +600,6 @@ fn DetailContent(
                             }
                         }).collect::<Vec<_>>()}
 
-                        // GA metric line
                         {move || {
                             if !show_ga() { return None; }
                             let (ref path, _, _, _) = ga_chart.get()?;
@@ -608,13 +617,11 @@ fn DetailContent(
                         }}
                     </svg>
 
-                    // Crosshair line
                     <div class="chart-crosshair"
                         style:display=move || if hover_idx.get().is_some() { "block" } else { "none" }
                         style:left=move || format!("{}%", crosshair_pct().unwrap_or(0.0))
                     ></div>
 
-                    // Hover dots on each visible GSC line
                     {lines.iter().map(|line| {
                         let y_pcts = line.y_pcts.clone();
                         let color = line.color.to_string();
@@ -645,7 +652,6 @@ fn DetailContent(
                         }
                     }).collect::<Vec<_>>()}
 
-                    // GA metric hover dot
                     <div
                         class="chart-dot"
                         style:display=move || {
@@ -666,82 +672,21 @@ fn DetailContent(
                         style:background=ga_color
                     ></div>
 
-                    // Tooltip
-                    {move || {
-                        tooltip_content().map(|(date, clicks, impressions, ctr, position)| {
-                            let pct = crosshair_pct().unwrap_or(0.0);
-                            let align_right = pct > 70.0;
-                            view! {
-                                <div class="chart-tooltip"
-                                    class:tooltip-right=align_right
-                                    style:left=format!("{}%", pct)
-                                >
-                                    <div class="tooltip-date">{date}</div>
-                                    <Show when=move || show_clicks.get() && clicks.is_some()>
-                                        <div class="tooltip-row">
-                                            <span class="tooltip-dot" style="background: var(--green)"></span>
-                                            <span class="tooltip-label">"Clicks"</span>
-                                            <span class="tooltip-val">{format_tip_number(clicks.unwrap_or(0.0))}</span>
-                                        </div>
-                                    </Show>
-                                    <Show when=move || show_impressions.get() && impressions.is_some()>
-                                        <div class="tooltip-row">
-                                            <span class="tooltip-dot" style="background: var(--accent)"></span>
-                                            <span class="tooltip-label">"Impressions"</span>
-                                            <span class="tooltip-val">{format_tip_number(impressions.unwrap_or(0.0))}</span>
-                                        </div>
-                                    </Show>
-                                    <Show when=move || show_ctr.get() && ctr.is_some()>
-                                        <div class="tooltip-row">
-                                            <span class="tooltip-dot" style="background: var(--chart-orange)"></span>
-                                            <span class="tooltip-label">"CTR"</span>
-                                            <span class="tooltip-val">{format_ctr(ctr.unwrap_or(0.0))}</span>
-                                        </div>
-                                    </Show>
-                                    <Show when=move || show_position.get() && position.is_some()>
-                                        <div class="tooltip-row">
-                                            <span class="tooltip-dot" style="background: var(--chart-purple)"></span>
-                                            <span class="tooltip-label">"Position"</span>
-                                            <span class="tooltip-val">{format_position(position.unwrap_or(0.0))}</span>
-                                        </div>
-                                    </Show>
-                                    <Show when=move || show_ga() && ga_chart.get().is_some()>
-                                        <div class="tooltip-row">
-                                            <span class="tooltip-dot" style:background=ga_color></span>
-                                            <span class="tooltip-label">{
-                                                move || {
-                                                    let metric = ga_metric.get();
-                                                    GA_METRICS.iter()
-                                                        .find(|(k, _, _)| Some(k.to_string()) == metric)
-                                                        .map_or("GA", |(_, l, _)| l)
-                                                        .to_string()
-                                                }
-                                            }</span>
-                                            <span class="tooltip-val">{
-                                                move || {
-                                                    let idx = hover_idx.get().unwrap_or(0);
-                                                    ga_chart.get()
-                                                        .and_then(|(_, _, _, ref vals)| vals.get(idx).copied())
-                                                        .map(|v| {
-                                                            let metric = ga_metric.get();
-                                                            match metric.as_deref() {
-                                                                Some("bounceRate") => format!("{:.1}%", v * 100.0),
-                                                                Some("averageSessionDuration") => format!("{:.0}s", v),
-                                                                _ => format_tip_number(v),
-                                                            }
-                                                        })
-                                                        .unwrap_or_default()
-                                                }
-                                            }</span>
-                                        </div>
-                                    </Show>
-                                </div>
-                            }
-                        })
-                    }}
+                    <ChartTooltip
+                        tooltip_content=tooltip_content
+                        crosshair_pct=crosshair_pct
+                        show_clicks=show_clicks
+                        show_impressions=show_impressions
+                        show_ctr=show_ctr
+                        show_position=show_position
+                        show_ga=show_ga
+                        ga_chart=ga_chart
+                        ga_metric=ga_metric
+                        ga_color=ga_color
+                        hover_idx=hover_idx
+                    />
                 </div>
 
-                // Right axis: Impressions (blue)
                 <div class="chart-axis chart-axis-right"
                     style:visibility=move || if show_impressions.get() { "visible" } else { "hidden" }
                 >
@@ -751,8 +696,146 @@ fn DetailContent(
                 </div>
             </div>
         </div>
+    }
+}
 
-        <DimensionTabs site_url=site_url days=days/>
+#[component]
+fn ChartToggles(
+    show_clicks: ReadSignal<bool>,
+    set_show_clicks: WriteSignal<bool>,
+    show_impressions: ReadSignal<bool>,
+    set_show_impressions: WriteSignal<bool>,
+    show_ctr: ReadSignal<bool>,
+    set_show_ctr: WriteSignal<bool>,
+    show_position: ReadSignal<bool>,
+    set_show_position: WriteSignal<bool>,
+    ga_metric: ReadSignal<Option<String>>,
+    set_ga_metric: WriteSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <div class="chart-toggles-row">
+            <div class="chart-toggles">
+                <MetricToggle label="Clicks" color="var(--green)" active=show_clicks set_active=set_show_clicks/>
+                <MetricToggle label="Impressions" color="var(--accent)" active=show_impressions set_active=set_show_impressions/>
+                <MetricToggle label="CTR" color="var(--chart-orange)" active=show_ctr set_active=set_show_ctr/>
+                <MetricToggle label="Position" color="var(--chart-purple)" active=show_position set_active=set_show_position/>
+            </div>
+            <div class="chart-toggles ga-toggles">
+                {GA_METRICS.iter().map(|(key, label, color)| {
+                    let key = key.to_string();
+                    let key_for_check = key.clone();
+                    let key_for_click = key.clone();
+                    let color = color.to_string();
+                    let color_c = color.clone();
+                    let key_for_bg = key.clone();
+                    view! {
+                        <button
+                            class="metric-toggle"
+                            class:metric-toggle-active=move || ga_metric.get().as_deref() == Some(&key_for_check)
+                            style:border-color=color.clone()
+                            style:background-color=move || if ga_metric.get().as_deref() == Some(&key_for_bg) { color_c.clone() } else { "transparent".into() }
+                            on:click=move |_| {
+                                if ga_metric.get().as_deref() == Some(&key_for_click) {
+                                    set_ga_metric.set(None);
+                                } else {
+                                    set_ga_metric.set(Some(key_for_click.clone()));
+                                }
+                            }
+                        >
+                            {*label}
+                        </button>
+                    }
+                }).collect::<Vec<_>>()}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn ChartTooltip(
+    tooltip_content: impl Fn() -> Option<(String, Option<f64>, Option<f64>, Option<f64>, Option<f64>)> + Copy + Send + Sync + 'static,
+    crosshair_pct: impl Fn() -> Option<f64> + Copy + Send + Sync + 'static,
+    show_clicks: ReadSignal<bool>,
+    show_impressions: ReadSignal<bool>,
+    show_ctr: ReadSignal<bool>,
+    show_position: ReadSignal<bool>,
+    show_ga: impl Fn() -> bool + Copy + Send + Sync + 'static,
+    ga_chart: Memo<Option<(String, f64, Vec<f64>, Vec<f64>)>>,
+    ga_metric: ReadSignal<Option<String>>,
+    ga_color: impl Fn() -> String + Copy + Send + Sync + 'static,
+    hover_idx: ReadSignal<Option<usize>>,
+) -> impl IntoView {
+    move || {
+        tooltip_content().map(|(date, clicks, impressions, ctr, position)| {
+            let pct = crosshair_pct().unwrap_or(0.0);
+            let align_right = pct > 70.0;
+            view! {
+                <div class="chart-tooltip"
+                    class:tooltip-right=align_right
+                    style:left=format!("{}%", pct)
+                >
+                    <div class="tooltip-date">{date}</div>
+                    <Show when=move || show_clicks.get() && clicks.is_some()>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style="background: var(--green)"></span>
+                            <span class="tooltip-label">"Clicks"</span>
+                            <span class="tooltip-val">{format_tip_number(clicks.unwrap_or(0.0))}</span>
+                        </div>
+                    </Show>
+                    <Show when=move || show_impressions.get() && impressions.is_some()>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style="background: var(--accent)"></span>
+                            <span class="tooltip-label">"Impressions"</span>
+                            <span class="tooltip-val">{format_tip_number(impressions.unwrap_or(0.0))}</span>
+                        </div>
+                    </Show>
+                    <Show when=move || show_ctr.get() && ctr.is_some()>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style="background: var(--chart-orange)"></span>
+                            <span class="tooltip-label">"CTR"</span>
+                            <span class="tooltip-val">{format_ctr(ctr.unwrap_or(0.0))}</span>
+                        </div>
+                    </Show>
+                    <Show when=move || show_position.get() && position.is_some()>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style="background: var(--chart-purple)"></span>
+                            <span class="tooltip-label">"Position"</span>
+                            <span class="tooltip-val">{format_position(position.unwrap_or(0.0))}</span>
+                        </div>
+                    </Show>
+                    <Show when=move || show_ga() && ga_chart.get().is_some()>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style:background=ga_color></span>
+                            <span class="tooltip-label">{
+                                move || {
+                                    let metric = ga_metric.get();
+                                    GA_METRICS.iter()
+                                        .find(|(k, _, _)| Some(k.to_string()) == metric)
+                                        .map_or("GA", |(_, l, _)| l)
+                                        .to_string()
+                                }
+                            }</span>
+                            <span class="tooltip-val">{
+                                move || {
+                                    let idx = hover_idx.get().unwrap_or(0);
+                                    ga_chart.get()
+                                        .and_then(|(_, _, _, ref vals)| vals.get(idx).copied())
+                                        .map(|v| {
+                                            let metric = ga_metric.get();
+                                            match metric.as_deref() {
+                                                Some("bounceRate") => format!("{:.1}%", v * 100.0),
+                                                Some("averageSessionDuration") => format!("{:.0}s", v),
+                                                _ => format_tip_number(v),
+                                            }
+                                        })
+                                        .unwrap_or_default()
+                                }
+                            }</span>
+                        </div>
+                    </Show>
+                </div>
+            }
+        })
     }
 }
 

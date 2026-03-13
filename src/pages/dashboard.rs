@@ -203,21 +203,46 @@ fn DashboardContent(
         if m.is_empty() { None } else { Some(m.values().map(|d| d.total).sum::<f64>()) }
     });
 
+    let count = data.properties.len();
+
+    view! {
+        <StatsGrid
+            totals=data.totals
+            label=label
+            total_ga_sessions=total_ga_sessions
+        />
+        <h2>{format!("Properties ({count})")}</h2>
+        <PropertyTable properties=data.properties ga_map=ga_map/>
+    }
+}
+
+#[component]
+fn StatsGrid(
+    totals: crate::api::GscMetrics,
+    label: String,
+    total_ga_sessions: Memo<Option<f64>>,
+) -> impl IntoView {
     view! {
         <div class="stats-grid">
-            <StatCard label="Impressions" value=format_number(data.totals.impressions) sub=label.clone()/>
-            <StatCard label="Clicks" value=format_number(data.totals.clicks) sub=label.clone()/>
-            <StatCard label="CTR" value=format_ctr(data.totals.ctr) sub=String::new()/>
-            <StatCard label="Avg Position" value=format_position(data.totals.position) sub=String::new()/>
+            <StatCard label="Impressions" value=format_number(totals.impressions) sub=label.clone()/>
+            <StatCard label="Clicks" value=format_number(totals.clicks) sub=label/>
+            <StatCard label="CTR" value=format_ctr(totals.ctr) sub=String::new()/>
+            <StatCard label="Avg Position" value=format_position(totals.position) sub=String::new()/>
             <div class="stat-card">
                 <div class="stat-label">"Sessions"</div>
                 <div class="stat-value">{move || total_ga_sessions.get().map(format_number).unwrap_or_else(|| "-".into())}</div>
                 <div class="stat-sub color-teal">"Google Analytics"</div>
             </div>
         </div>
+    }
+}
 
-        <h2>{format!("Properties ({})", data.properties.len())}</h2>
-
+#[component]
+fn PropertyTable(
+    properties: Vec<crate::api::PropertyData>,
+    ga_map: Memo<HashMap<String, GaPropertyData>>,
+) -> impl IntoView {
+    view! {
         <div class="table-card">
             <table class="prop-table">
                 <thead>
@@ -233,52 +258,61 @@ fn DashboardContent(
                     </tr>
                 </thead>
                 <tbody>
-                    {data.properties.into_iter().map(|p| {
-                        let sparkline = build_sparkline_path(&p.daily, |r| r.impressions);
-                        let href = format!("/property/{}", urlencoding::encode(&p.site_url));
-                        let site_url = p.site_url.clone();
-                        view! {
-                            <tr class="prop-row-link">
-                                <td class="prop-name"><a href={href.clone()} class="row-link">{clean_url(&p.site_url)}</a></td>
-                                <td class="num-cell"><a href={href.clone()} class="row-link">{format_number(p.impressions)}</a></td>
-                                <td class="num-cell"><a href={href.clone()} class="row-link">{format_number(p.clicks)}</a></td>
-                                <td class="num-cell"><a href={href.clone()} class="row-link">{format_ctr(p.ctr)}</a></td>
-                                <td class="num-cell"><a href={href.clone()} class="row-link">{format_position(p.position)}</a></td>
-                                <td class="num-cell ga-col">
-                                    <a href={href.clone()} class="row-link color-teal">{
-                                        let url = site_url.clone();
-                                        move || ga_map.get().get(&url).map(|d| format_number(d.total)).unwrap_or_else(|| "-".to_string())
-                                    }</a>
-                                </td>
-                                <td class="sparkline-cell">
-                                    <a href={href.clone()} class="row-link">
-                                        <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
-                                            <path d={sparkline} fill="none" stroke="var(--accent)" stroke-width="1.5"/>
-                                        </svg>
-                                    </a>
-                                </td>
-                                <td class="sparkline-cell">
-                                    <a href={href} class="row-link">{
-                                        let url2 = site_url.clone();
-                                        move || {
-                                            let path = ga_map.get().get(&url2).map(|d| build_sparkline_from_values(&d.daily)).unwrap_or_default();
-                                            if path.is_empty() {
-                                                return view! { <span></span> }.into_any();
-                                            }
-                                            view! {
-                                                <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
-                                                    <path d={path} fill="none" stroke="var(--chart-teal)" stroke-width="1.5"/>
-                                                </svg>
-                                            }.into_any()
-                                        }
-                                    }</a>
-                                </td>
-                            </tr>
-                        }
+                    {properties.into_iter().map(|p| {
+                        view! { <PropertyRow property=p ga_map=ga_map/> }
                     }).collect::<Vec<_>>()}
                 </tbody>
             </table>
         </div>
+    }
+}
+
+#[component]
+fn PropertyRow(
+    property: crate::api::PropertyData,
+    ga_map: Memo<HashMap<String, GaPropertyData>>,
+) -> impl IntoView {
+    let sparkline = build_sparkline_path(&property.daily, |r| r.impressions);
+    let href = format!("/property/{}", urlencoding::encode(&property.site_url));
+    let site_url = property.site_url.clone();
+    let url_for_sessions = site_url.clone();
+    let url_for_ga_spark = site_url.clone();
+
+    view! {
+        <tr class="prop-row-link">
+            <td class="prop-name"><a href={href.clone()} class="row-link">{clean_url(&property.site_url)}</a></td>
+            <td class="num-cell"><a href={href.clone()} class="row-link">{format_number(property.impressions)}</a></td>
+            <td class="num-cell"><a href={href.clone()} class="row-link">{format_number(property.clicks)}</a></td>
+            <td class="num-cell"><a href={href.clone()} class="row-link">{format_ctr(property.ctr)}</a></td>
+            <td class="num-cell"><a href={href.clone()} class="row-link">{format_position(property.position)}</a></td>
+            <td class="num-cell ga-col">
+                <a href={href.clone()} class="row-link color-teal">{
+                    move || ga_map.get().get(&url_for_sessions).map(|d| format_number(d.total)).unwrap_or_else(|| "-".to_string())
+                }</a>
+            </td>
+            <td class="sparkline-cell">
+                <a href={href.clone()} class="row-link">
+                    <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
+                        <path d={sparkline} fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+                    </svg>
+                </a>
+            </td>
+            <td class="sparkline-cell">
+                <a href={href} class="row-link">{
+                    move || {
+                        let path = ga_map.get().get(&url_for_ga_spark).map(|d| build_sparkline_from_values(&d.daily)).unwrap_or_default();
+                        if path.is_empty() {
+                            return view! { <span></span> }.into_any();
+                        }
+                        view! {
+                            <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
+                                <path d={path} fill="none" stroke="var(--chart-teal)" stroke-width="1.5"/>
+                            </svg>
+                        }.into_any()
+                    }
+                }</a>
+            </td>
+        </tr>
     }
 }
 
