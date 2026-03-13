@@ -214,8 +214,12 @@ h2 {
 }
 
 .prop-table td {
-  padding: 0.65rem 1rem;
+  padding: 0;
   border-bottom: 1px solid var(--border);
+}
+
+.prop-table td .row-link {
+  padding: 0.65rem 1rem;
 }
 
 .prop-table tbody tr:last-child td {

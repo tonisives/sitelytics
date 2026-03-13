@@ -136,7 +136,12 @@ pub fn DetailPage() -> impl IntoView {
 
         ga_loading.set(true);
         leptos::task::spawn_local(async move {
+            leptos::logging::log!("[ga-client] fetching {} for {}", metric, url);
             let result = fetch_ga_sessions(url.clone(), d, metric.clone()).await.ok().flatten();
+            match &result {
+                Some(data) => leptos::logging::log!("[ga-client] got {} rows, total={}", data.daily.len(), data.total),
+                None => leptos::logging::log!("[ga-client] no data returned"),
+            }
             if let Some(ref data) = result {
                 let cache_key = (url, d, metric);
                 ga_cache.update(|m| { m.insert(cache_key, Some(data.clone())); });
@@ -201,7 +206,7 @@ pub fn DetailPage() -> impl IntoView {
             <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
                 {move || data.get().map(|result| match result {
                     Err(e) if e.to_string().contains("Not authenticated") => view! { <LoginPage/> }.into_any(),
-                    Ok(prop) => view! { <DetailContent prop=prop site_url=site_url() days=days.get() ga_data=ga_data_sig ga_loading=ga_loading ga_metric=ga_metric set_ga_metric=set_ga_metric/> }.into_any(),
+                    Ok(prop) => view! { <DetailContent prop=prop site_url=site_url() days=days.get() ga_data=ga_data_sig _ga_loading=ga_loading ga_metric=ga_metric set_ga_metric=set_ga_metric/> }.into_any(),
                     Err(e) => view! { <div class="error-text">{e.to_string()}</div> }.into_any(),
                 })}
             </Suspense>
@@ -269,7 +274,7 @@ fn DetailContent(
     site_url: String,
     days: u64,
     ga_data: RwSignal<Option<GaSessionsData>>,
-    ga_loading: RwSignal<bool>,
+    _ga_loading: RwSignal<bool>,
     ga_metric: ReadSignal<Option<String>>,
     set_ga_metric: WriteSignal<Option<String>>,
 ) -> impl IntoView {
@@ -463,20 +468,20 @@ fn DetailContent(
                     <div class="stat-value">{value}</div>
                 </div>
             }).collect::<Vec<_>>()}
-            <Show when=move || ga_total.get().is_some()>
-                <div class="stat-card">
-                    <div class="stat-label">{
-                        move || {
-                            let metric = ga_metric.get();
-                            GA_METRICS.iter()
-                                .find(|(k, _, _)| Some(k.to_string()) == metric)
-                                .map_or("GA", |(_, l, _)| l)
-                                .to_string()
-                        }
-                    }</div>
-                    <div class="stat-value">{move || {
-                        let total = ga_total.get().unwrap_or(0.0);
-                        match ga_metric.get().as_deref() {
+            <div class="stat-card">
+                <div class="stat-label">{
+                    move || {
+                        let metric = ga_metric.get();
+                        GA_METRICS.iter()
+                            .find(|(k, _, _)| Some(k.to_string()) == metric)
+                            .map_or("GA", |(_, l, _)| l)
+                            .to_string()
+                    }
+                }</div>
+                <div class="stat-value">{move || {
+                    match ga_total.get() {
+                        None => "-".to_string(),
+                        Some(total) => match ga_metric.get().as_deref() {
                             Some("bounceRate") => format!("{:.1}%", total / ga_data.get().map_or(1.0, |g| g.daily.len() as f64) * 100.0),
                             Some("averageSessionDuration") => {
                                 let count = ga_data.get().map_or(1.0, |g| g.daily.len() as f64);
@@ -484,9 +489,9 @@ fn DetailContent(
                             }
                             _ => format_number(total),
                         }
-                    }}</div>
-                </div>
-            </Show>
+                    }
+                }}</div>
+            </div>
         </div>
 
         <div class="chart-card">
@@ -498,7 +503,6 @@ fn DetailContent(
                     <MetricToggle label="Position" color="var(--chart-purple)" active=show_position set_active=set_show_position/>
                 </div>
                 <div class="chart-toggles ga-toggles">
-                    <span class="ga-loading" style:display=move || if ga_loading.get() { "inline" } else { "none" }>"Loading GA..."</span>
                     {GA_METRICS.iter().map(|(key, label, color)| {
                         let key = key.to_string();
                         let key_for_check = key.clone();

@@ -22,6 +22,10 @@ pub type DetailCache = RwSignal<Option<(String, u64, crate::api::PropertyData)>>
 /// Cached GA data: key is (site_url, days, metric) -> GaSessionsData
 pub type GaCache = RwSignal<HashMap<(String, u64, String), Option<GaSessionsData>>>;
 
+/// Cached dashboard GA sessions: (days) -> per-property GA data
+pub type DashboardGaCache =
+    RwSignal<Option<(u64, HashMap<String, crate::pages::dashboard::GaPropertyData>)>>;
+
 #[server(Logout, "/api")]
 pub async fn logout() -> Result<(), ServerFnError> {
     use leptos_axum::ResponseOptions;
@@ -49,6 +53,9 @@ pub fn App() -> impl IntoView {
 
     let ga_cache: GaCache = RwSignal::new(HashMap::new());
     provide_context(ga_cache);
+
+    let dashboard_ga_cache: DashboardGaCache = RwSignal::new(None);
+    provide_context(dashboard_ga_cache);
 
     view! {
         <Stylesheet id="leptos" href="/pkg/sitelytics.css"/>

@@ -1,5 +1,5 @@
 use crate::api::DashboardData;
-use crate::app::{logout, DashboardCache};
+use crate::app::{logout, DashboardCache, DashboardGaCache};
 use crate::pages::detail::build_sparkline_path;
 use crate::pages::login::LoginPage;
 use leptos::prelude::*;
@@ -21,12 +21,19 @@ pub async fn fetch_gsc_data(days: u64) -> Result<DashboardData, ServerFnError> {
     result.map_err(ServerFnError::new)
 }
 
-/// Fetch total GA sessions for all properties
+/// GA data per property: (total, daily values for sparkline)
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GaPropertyData {
+    pub total: f64,
+    pub daily: Vec<f64>,
+}
+
+/// Fetch GA sessions for all properties (total + daily for sparkline)
 #[server(FetchAllGaSessions, "/api")]
 pub async fn fetch_all_ga_sessions(
     site_urls: Vec<String>,
     days: u64,
-) -> Result<HashMap<String, f64>, ServerFnError> {
+) -> Result<HashMap<String, GaPropertyData>, ServerFnError> {
     let req = expect_context::<http::request::Parts>();
     let session = crate::api::server::extract_session(&req.headers)
         .await
@@ -48,7 +55,8 @@ pub async fn fetch_all_ga_sessions(
                 let daily = crate::api::server::fetch_ga_daily_sessions(&token, &pid, d).await;
                 if let Ok(rows) = daily {
                     let total: f64 = rows.iter().map(|(_, s)| s).sum();
-                    return Some((url, total));
+                    let values: Vec<f64> = rows.iter().map(|(_, s)| *s).collect();
+                    return Some((url, GaPropertyData { total, daily: values }));
                 }
             }
             None
@@ -56,8 +64,8 @@ pub async fn fetch_all_ga_sessions(
     }
 
     while let Some(res) = tasks.join_next().await {
-        if let Ok(Some((url, total))) = res {
-            result.insert(url, total);
+        if let Ok(Some((url, data))) = res {
+            result.insert(url, data);
         }
     }
 
@@ -74,7 +82,7 @@ pub fn DashboardPage() -> impl IntoView {
     let cache = expect_context::<DashboardCache>();
 
     // Restore days from cache or default to 28
-    let initial_days = cache.get().map_or(28, |(d, _)| d);
+    let initial_days = cache.get_untracked().map_or(28, |(d, _)| d);
     let (days, set_days) = signal(initial_days);
 
     let data = Resource::new(
@@ -107,8 +115,8 @@ pub fn DashboardPage() -> impl IntoView {
         });
     };
 
-    // GA sessions signal - lives at page level so it survives DashboardContent re-mounts
-    let ga_map = RwSignal::new(HashMap::<String, f64>::new());
+    // GA sessions - app-level cache, keyed by days
+    let ga_cache = expect_context::<DashboardGaCache>();
 
     view! {
         <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
@@ -127,7 +135,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 <button class="logout-btn" on:click=handle_logout>"Sign out"</button>
                             </div>
                         </header>
-                        <DashboardContent data=d days=days.get() ga_map=ga_map/>
+                        <DashboardContent data=d days=days.get() ga_cache=ga_cache/>
                     </div>
                 }.into_any(),
                 Err(e) => view! {
@@ -161,26 +169,38 @@ fn DayButton(days: ReadSignal<u64>, set_days: WriteSignal<u64>, value: u64) -> i
 fn DashboardContent(
     data: DashboardData,
     days: u64,
-    ga_map: RwSignal<HashMap<String, f64>>,
+    ga_cache: DashboardGaCache,
 ) -> impl IntoView {
     let label = format!("Last {days} days");
 
-    // GA sessions - fetch client-side only via Effect (Effects don't run on server)
+    // GA sessions - fetch client-side only, skip if already cached
     let urls: Vec<String> = data.properties.iter().map(|p| p.site_url.clone()).collect();
-    if !urls.is_empty() {
+    let cached = ga_cache
+        .get_untracked()
+        .filter(|(d, _)| *d == days)
+        .is_some();
+    if !urls.is_empty() && !cached {
         Effect::new(move |_| {
             let urls = urls.clone();
             leptos::task::spawn_local(async move {
                 if let Ok(map) = fetch_all_ga_sessions(urls, days).await {
-                    ga_map.set(map);
+                    ga_cache.set(Some((days, map)));
                 }
             });
         });
     }
 
+    let ga_map = Memo::new(move |_| {
+        ga_cache
+            .get()
+            .filter(|(d, _)| *d == days)
+            .map(|(_, m)| m)
+            .unwrap_or_default()
+    });
+
     let total_ga_sessions = Memo::new(move |_| {
         let m = ga_map.get();
-        if m.is_empty() { None } else { Some(m.values().sum::<f64>()) }
+        if m.is_empty() { None } else { Some(m.values().map(|d| d.total).sum::<f64>()) }
     });
 
     view! {
@@ -189,13 +209,11 @@ fn DashboardContent(
             <StatCard label="Clicks" value=format_number(data.totals.clicks) sub=label.clone()/>
             <StatCard label="CTR" value=format_ctr(data.totals.ctr) sub=String::new()/>
             <StatCard label="Avg Position" value=format_position(data.totals.position) sub=String::new()/>
-            <Show when=move || total_ga_sessions.get().is_some()>
-                <div class="stat-card">
-                    <div class="stat-label">"Sessions"</div>
-                    <div class="stat-value">{move || total_ga_sessions.get().map(format_number).unwrap_or_default()}</div>
-                    <div class="stat-sub color-teal">"Google Analytics"</div>
-                </div>
-            </Show>
+            <div class="stat-card">
+                <div class="stat-label">"Sessions"</div>
+                <div class="stat-value">{move || total_ga_sessions.get().map(format_number).unwrap_or_else(|| "-".into())}</div>
+                <div class="stat-sub color-teal">"Google Analytics"</div>
+            </div>
         </div>
 
         <h2>{format!("Properties ({})", data.properties.len())}</h2>
@@ -211,6 +229,7 @@ fn DashboardContent(
                         <th class="num-cell">"Position"</th>
                         <th class="num-cell ga-col">"Sessions"</th>
                         <th class="sparkline-header">"Trend"</th>
+                        <th class="sparkline-header ga-col">"GA Trend"</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -228,15 +247,31 @@ fn DashboardContent(
                                 <td class="num-cell ga-col">
                                     <a href={href.clone()} class="row-link color-teal">{
                                         let url = site_url.clone();
-                                        move || ga_map.get().get(&url).copied().map(format_number).unwrap_or_else(|| "-".to_string())
+                                        move || ga_map.get().get(&url).map(|d| format_number(d.total)).unwrap_or_else(|| "-".to_string())
                                     }</a>
                                 </td>
                                 <td class="sparkline-cell">
-                                    <a href={href} class="row-link">
+                                    <a href={href.clone()} class="row-link">
                                         <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
                                             <path d={sparkline} fill="none" stroke="var(--accent)" stroke-width="1.5"/>
                                         </svg>
                                     </a>
+                                </td>
+                                <td class="sparkline-cell">
+                                    <a href={href} class="row-link">{
+                                        let url2 = site_url.clone();
+                                        move || {
+                                            let path = ga_map.get().get(&url2).map(|d| build_sparkline_from_values(&d.daily)).unwrap_or_default();
+                                            if path.is_empty() {
+                                                return view! { <span></span> }.into_any();
+                                            }
+                                            view! {
+                                                <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
+                                                    <path d={path} fill="none" stroke="var(--chart-teal)" stroke-width="1.5"/>
+                                                </svg>
+                                            }.into_any()
+                                        }
+                                    }</a>
                                 </td>
                             </tr>
                         }
@@ -249,17 +284,40 @@ fn DashboardContent(
 
 #[component]
 fn StatCard(label: &'static str, value: String, sub: String) -> impl IntoView {
-    let sub_clone = sub.clone();
-    let has_sub = !sub.is_empty();
+    let show_sub = if sub.is_empty() { "none" } else { "block" };
     view! {
         <div class="stat-card">
             <div class="stat-label">{label}</div>
             <div class="stat-value">{value}</div>
-            <Show when=move || has_sub>
-                <div class="stat-sub">{sub_clone.clone()}</div>
-            </Show>
+            <div class="stat-sub" style:display=show_sub>{sub}</div>
         </div>
     }
+}
+
+fn build_sparkline_from_values(values: &[f64]) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let max = values.iter().cloned().fold(0.0f64, f64::max);
+    let max = if max == 0.0 { 1.0 } else { max };
+    let w = 80.0;
+    let h = 24.0;
+    let step = if values.len() > 1 {
+        w / (values.len() - 1) as f64
+    } else {
+        w
+    };
+    let mut path = String::new();
+    for (i, v) in values.iter().enumerate() {
+        let x = i as f64 * step;
+        let y = h - (v / max * (h - 2.0) + 1.0);
+        if i == 0 {
+            path.push_str(&format!("M{:.1},{:.1}", x, y));
+        } else {
+            path.push_str(&format!(" L{:.1},{:.1}", x, y));
+        }
+    }
+    path
 }
 
 fn clean_url(url: &str) -> String {
