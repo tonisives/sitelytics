@@ -259,7 +259,8 @@ pub mod server {
     pub fn apply_session_cookie(session: &SessionData) {
         if let Some(cookie) = &session.updated_cookie {
             if let Ok(val) = cookie.parse() {
-                let response =ponse.insert_header(http::header::SET_COOKIE, val);
+                let response = leptos::prelude::expect_context::<leptos_axum::ResponseOptions>();
+                response.insert_header(http::header::SET_COOKIE, val);
             }
         }
     }
@@ -321,15 +322,6 @@ pub mod server {
                 if leap { 29 } else { 28 },
                 31,
                 30,
-                30,
-                31,
-                30,
-                31,
-                31,
-                30,
-                31,
-                30,
-               
                 31,
                 30,
                 31,
@@ -620,22 +612,8 @@ pub mod server {
             .to_lowercase()
     }
 
-    /// Cached GA property mapping: Vec<(property_id, normalized_url)>
-    static GA_PROPERTY_CACHE: tokio::sync::OnceCell<Vec<(String, String)>> =
-        tokio::sync::OnceCell::const_new();
-
     /// List all GA4 property IDs with their associated website URLs.
-    /// Results are cached for the st_ga_properties(ent: &reqwest::Client,
-        access_token: &str,
-    ) -> &'static Vec<(String, String)> {
-        let token = access_token.to_string();
-        let client = client.clone();
-        GA_PROPERTY_CACHE
-            .get_or_init(|| async { list_ga_properties_inner(&client, &token).await })
-            .await
-    }
-
-    async fn list_ga_properties_inner(
+    async fn list_ga_properties(
         client: &reqwest::Client,
         access_token: &str,
     ) -> Vec<(String, String)> {
@@ -667,10 +645,7 @@ pub mod server {
                     .flat_map(|acct| acct.property_summaries.iter())
                     .map(|prop| prop.property.clone()),
             );
-            if dat
-            a.next_page_token.is_none() {
-           
-        
+            if data.next_page_token.is_none() {
                 break;
             }
             page_token = data.next_page_token;
@@ -678,8 +653,9 @@ pub mod server {
 
         eprintln!(
             "[ga] found {} GA4 properties, fetching data streams...",
-            property_ids.
-        );format!(
+            property_ids.len()
+        );
+
         // 2. Fetch data streams in parallel
         let mut tasks = tokio::task::JoinSet::new();
         for prop_id in property_ids {
@@ -717,7 +693,7 @@ pub mod server {
             result.extend(entries);
         }
 
-        eprintln!("[ga] cached {} GA4 property-url mappings", result.len());
+        eprintln!("[ga] resolved {} GA4 property-url mappings", result.len());
         result
     }
 
@@ -792,24 +768,12 @@ pub mod server {
 
     /// Resolve which GA4 property ID matches a GSC site URL.
     pub async fn resolve_ga_property(access_token: &str, site_url: &str) -> Option<String> {
-        let client = r
-                eqwest::Client::new();
-                site_url,
-                normalized_site,
-                ga_props
-                    .iter()
-                    
-                    
-            
+        let client = reqwest::Client::new();
         let ga_props = list_ga_properties(&client, access_token).await;
         let normalized_site = normalize_url_for_match(site_url);
 
         if !site_url.is_empty() {
-            eprintln!( {
-               
-                   
-                   
-            }
+            eprintln!(
                 "[ga-resolve] site_url={:?} normalized={:?} ga_props={:?}",
                 site_url,
                 normalized_site,
@@ -821,12 +785,12 @@ pub mod server {
         }
 
         ga_props
-            .iter()
+            .into_iter()
             .find(|(_, ga_url)| {
                 *ga_url == normalized_site
                     || normalized_site.contains(ga_url.as_str())
                     || ga_url.contains(normalized_site.as_str())
             })
-            .map(|(id, _)| id.clone())
+            .map(|(id, _)| id)
     }
 }
