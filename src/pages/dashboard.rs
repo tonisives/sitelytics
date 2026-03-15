@@ -4,6 +4,8 @@ use crate::pages::detail::build_sparkline_path;
 use crate::pages::login::LoginPage;
 use leptos::prelude::*;
 use std::collections::HashMap;
+use leptos::wasm_bindgen::JsCast;
+use leptos::web_sys;
 
 #[server(FetchGscData, "/api")]
 pub async fn fetch_gsc_data(days: u64) -> Result<DashboardData, ServerFnError> {
@@ -281,6 +283,13 @@ fn PropertyRow(
     let url_for_sessions = site_url.clone();
     let url_for_ga_spark = site_url.clone();
 
+    let impressions_data: Vec<(String, f64)> = property
+        .daily
+        .iter()
+        .map(|r| (r.date.clone(), r.impressions))
+        .collect();
+    let dates: Vec<String> = property.daily.iter().map(|r| r.date.clone()).collect();
+
     view! {
         <tr class="prop-row-link">
             <td class="prop-name"><a href={href.clone()} class="row-link">{clean_url(&property.site_url)}</a></td>
@@ -294,28 +303,107 @@ fn PropertyRow(
                 }</a>
             </td>
             <td class="sparkline-cell">
-                <a href={href.clone()} class="row-link">
-                    <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
-                        <path d={sparkline} fill="none" stroke="var(--accent)" stroke-width="1.5"/>
-                    </svg>
-                </a>
+                <SparklineTooltip
+                    href={href.clone()}
+                    path={sparkline}
+                    color="var(--accent)"
+                    data={impressions_data}
+                    label="Impressions"
+                />
             </td>
             <td class="sparkline-cell">
-                <a href={href} class="row-link">{
+                {
+                    let href = href.clone();
+                    let dates = dates.clone();
                     move || {
-                        let path = ga_map.get().get(&url_for_ga_spark).map(|d| build_sparkline_from_values(&d.daily)).unwrap_or_default();
-                        if path.is_empty() {
-                            return view! { <span></span> }.into_any();
+                        let ga = ga_map.get();
+                        let ga_data = ga.get(&url_for_ga_spark);
+                        match ga_data {
+                            None => view! { <a href={href.clone()} class="row-link"><span></span></a> }.into_any(),
+                            Some(d) => {
+                                let path = build_sparkline_from_values(&d.daily);
+                                if path.is_empty() {
+                                    return view! { <a href={href.clone()} class="row-link"><span></span></a> }.into_any();
+                                }
+                                let data: Vec<(String, f64)> = dates.iter().zip(d.daily.iter())
+                                    .map(|(date, val)| (date.clone(), *val))
+                                    .collect();
+                                view! {
+                                    <SparklineTooltip
+                                        href={href.clone()}
+                                        path={path}
+                                        color="var(--chart-teal)"
+                                        data={data}
+                                        label="Sessions"
+                                    />
+                                }.into_any()
+                            }
                         }
-                        view! {
-                            <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
-                                <path d={path} fill="none" stroke="var(--chart-teal)" stroke-width="1.5"/>
-                            </svg>
-                        }.into_any()
                     }
-                }</a>
+                }
             </td>
         </tr>
+    }
+}
+
+#[component]
+fn SparklineTooltip(
+    href: String,
+    path: String,
+    color: &'static str,
+    data: Vec<(String, f64)>,
+    label: &'static str,
+) -> impl IntoView {
+    let (hover_idx, set_hover_idx) = signal(Option::<usize>::None);
+    let len = data.len();
+    let data = StoredValue::new(data);
+
+    let handle_mouse_move = move |ev: leptos::ev::MouseEvent| {
+        if len == 0 { return; }
+        let target = ev.current_target().unwrap();
+        let el: web_sys::HtmlElement = target.unchecked_into();
+        let w = el.offset_width() as f64;
+        let x = ev.offset_x() as f64;
+        if w <= 0.0 { return; }
+        let ratio = (x / w).clamp(0.0, 1.0);
+        let idx = (ratio * (len - 1) as f64).round() as usize;
+        set_hover_idx.set(Some(idx.min(len - 1)));
+    };
+
+    let handle_mouse_leave = move |_: leptos::ev::MouseEvent| {
+        set_hover_idx.set(None);
+    };
+
+    view! {
+        <a href={href} class="row-link sparkline-tooltip-wrap"
+            on:mousemove=handle_mouse_move
+            on:mouseleave=handle_mouse_leave
+        >
+            <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
+                <path d={path} fill="none" stroke={color} stroke-width="1.5"/>
+            </svg>
+            {move || {
+                let idx = hover_idx.get()?;
+                let items = data.get_value();
+                let (date, val) = items.get(idx)?;
+                let pct = if len > 1 { idx as f64 / (len - 1) as f64 * 100.0 } else { 50.0 };
+                let align_right = pct > 50.0;
+                Some(view! {
+                    <div
+                        class="sparkline-tip"
+                        class:sparkline-tip-right=align_right
+                        style:left=format!("{}%", pct)
+                    >
+                        <div class="tooltip-date">{date.clone()}</div>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style:background=color></span>
+                            <span class="tooltip-label">{label}</span>
+                            <span class="tooltip-val">{format_number(val.clone())}</span>
+                        </div>
+                    </div>
+                })
+            }}
+        </a>
     }
 }
 
