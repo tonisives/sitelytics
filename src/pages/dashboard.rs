@@ -2,6 +2,7 @@ use crate::api::DashboardData;
 use crate::app::{logout, DashboardCache, DashboardGaCache};
 use crate::pages::detail::build_sparkline_path;
 use crate::pages::login::LoginPage;
+use crate::pages::DayButton;
 use leptos::prelude::*;
 use std::collections::HashMap;
 use leptos::wasm_bindgen::JsCast;
@@ -105,19 +106,16 @@ pub fn DashboardPage() -> impl IntoView {
         },
     );
 
-    Effect::new(move || {
-        if let Some(Ok(d)) = data.get() {
-            cache.set(Some((days.get_untracked(), d)));
-        }
-    });
-
     let ga_cache = expect_context::<DashboardGaCache>();
 
     view! {
         <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
             {move || data.get().map(|result| match result {
                 Err(e) if is_auth_error(&e) => view! { <LoginPage/> }.into_any(),
-                Ok(d) => view! { <DashboardShell data=d days=days set_days=set_days ga_cache=ga_cache/> }.into_any(),
+                Ok(d) => {
+                    cache.set(Some((days.get_untracked(), d.clone())));
+                    view! { <DashboardShell data=d days=days set_days=set_days ga_cache=ga_cache/> }.into_any()
+                }
                 Err(e) => view! { <div class="container"><div class="error-text">{e.to_string()}</div></div> }.into_any(),
             })}
         </Suspense>
@@ -157,23 +155,6 @@ fn DashboardShell(
 }
 
 #[component]
-fn DayButton(days: ReadSignal<u64>, set_days: WriteSignal<u64>, value: u64) -> impl IntoView {
-    let active = move || days.get() == value;
-    let handle_click = move |_| set_days.set(value);
-    let label = format!("{value}d");
-
-    view! {
-        <button
-            class:day-btn=true
-            class:day-btn-active=active
-            on:click=handle_click
-        >
-            {label}
-        </button>
-    }
-}
-
-#[component]
 fn DashboardContent(
     data: DashboardData,
     days: u64,
@@ -189,14 +170,11 @@ fn DashboardContent(
         .is_some();
     let ga_loading = RwSignal::new(!cached && !urls.is_empty());
     if !urls.is_empty() && !cached {
-        Effect::new(move |_| {
-            let urls = urls.clone();
-            leptos::task::spawn_local(async move {
-                if let Ok(map) = fetch_all_ga_sessions(urls, days).await {
-                    ga_cache.set(Some((days, map)));
-                }
-                ga_loading.set(false);
-            });
+        leptos::task::spawn_local(async move {
+            if let Ok(map) = fetch_all_ga_sessions(urls, days).await {
+                ga_cache.set(Some((days, map)));
+            }
+            ga_loading.set(false);
         });
     }
 
@@ -271,7 +249,7 @@ fn PropertyTable(
                         <th class="num-cell">"CTR"</th>
                         <th class="num-cell">"Position"</th>
                         <th class="num-cell ga-col">"Sessions"</th>
-                        <th class="sparkline-header">"Impressions"</th>
+                        <th class="sparkline-header">"Clicks / Impressions"</th>
                         <th class="sparkline-header ga-col">"Sessions"</th>
                     </tr>
                 </thead>
@@ -290,16 +268,17 @@ fn PropertyRow(
     property: crate::api::PropertyData,
     ga_map: Memo<HashMap<String, GaPropertyData>>,
 ) -> impl IntoView {
-    let sparkline = build_sparkline_path(&property.daily, |r| r.impressions);
+    let impressions_path = build_sparkline_path(&property.daily, |r| r.impressions);
+    let clicks_path = build_sparkline_path(&property.daily, |r| r.clicks);
     let href = format!("/property/{}", urlencoding::encode(&property.site_url));
     let site_url = property.site_url.clone();
     let url_for_sessions = site_url.clone();
     let url_for_ga_spark = site_url.clone();
 
-    let impressions_data: Vec<(String, f64)> = property
+    let overlay_data: Vec<(String, f64, f64)> = property
         .daily
         .iter()
-        .map(|r| (r.date.clone(), r.impressions))
+        .map(|r| (r.date.clone(), r.clicks, r.impressions))
         .collect();
     let dates: Vec<String> = property.daily.iter().map(|r| r.date.clone()).collect();
 
@@ -316,12 +295,15 @@ fn PropertyRow(
                 }</a>
             </td>
             <td class="sparkline-cell">
-                <SparklineTooltip
+                <OverlaySparklineTooltip
                     href={href.clone()}
-                    path={sparkline}
-                    color="var(--accent)"
-                    data={impressions_data}
-                    label="Impressions"
+                    path_a={clicks_path}
+                    path_b={impressions_path}
+                    color_a="var(--green)"
+                    color_b="var(--accent)"
+                    data={overlay_data}
+                    label_a="Clicks"
+                    label_b="Impressions"
                 />
             </td>
             <td class="sparkline-cell">
@@ -412,6 +394,76 @@ fn SparklineTooltip(
                             <span class="tooltip-dot" style:background=color></span>
                             <span class="tooltip-label">{label}</span>
                             <span class="tooltip-val">{format_number(val.clone())}</span>
+                        </div>
+                    </div>
+                })
+            }}
+        </a>
+    }
+}
+
+#[component]
+fn OverlaySparklineTooltip(
+    href: String,
+    path_a: String,
+    path_b: String,
+    color_a: &'static str,
+    color_b: &'static str,
+    data: Vec<(String, f64, f64)>,
+    label_a: &'static str,
+    label_b: &'static str,
+) -> impl IntoView {
+    let (hover_idx, set_hover_idx) = signal(Option::<usize>::None);
+    let len = data.len();
+    let data = StoredValue::new(data);
+
+    let handle_mouse_move = move |ev: leptos::ev::MouseEvent| {
+        if len == 0 { return; }
+        let target = ev.current_target().unwrap();
+        let el: web_sys::HtmlElement = target.unchecked_into();
+        let w = el.offset_width() as f64;
+        let x = ev.offset_x() as f64;
+        if w <= 0.0 { return; }
+        let ratio = (x / w).clamp(0.0, 1.0);
+        let idx = (ratio * (len - 1) as f64).round() as usize;
+        set_hover_idx.set(Some(idx.min(len - 1)));
+    };
+
+    let handle_mouse_leave = move |_: leptos::ev::MouseEvent| {
+        set_hover_idx.set(None);
+    };
+
+    view! {
+        <a href={href} class="row-link sparkline-tooltip-wrap"
+            on:mousemove=handle_mouse_move
+            on:mouseleave=handle_mouse_leave
+        >
+            <svg class="sparkline" viewBox="0 0 80 24" preserveAspectRatio="none">
+                <path d={path_b} fill="none" stroke={color_b} stroke-width="1.5"/>
+                <path d={path_a} fill="none" stroke={color_a} stroke-width="1.5"/>
+            </svg>
+            {move || {
+                let idx = hover_idx.get()?;
+                let items = data.get_value();
+                let (date, val_a, val_b) = items.get(idx)?;
+                let pct = if len > 1 { idx as f64 / (len - 1) as f64 * 100.0 } else { 50.0 };
+                let align_right = pct > 50.0;
+                Some(view! {
+                    <div
+                        class="sparkline-tip"
+                        class:sparkline-tip-right=align_right
+                        style:left=format!("{}%", pct)
+                    >
+                        <div class="tooltip-date">{date.clone()}</div>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style:background=color_a></span>
+                            <span class="tooltip-label">{label_a}</span>
+                            <span class="tooltip-val">{format_number(val_a.clone())}</span>
+                        </div>
+                        <div class="tooltip-row">
+                            <span class="tooltip-dot" style:background=color_b></span>
+                            <span class="tooltip-label">{label_b}</span>
+                            <span class="tooltip-val">{format_number(val_b.clone())}</span>
                         </div>
                     </div>
                 })

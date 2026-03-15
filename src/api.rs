@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-// test comment
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GscMetrics {
     pub clicks: f64,
@@ -59,6 +57,16 @@ pub mod server {
     use axum::extract::Query;
     use axum::response::{IntoResponse, Redirect, Response};
 
+    fn http_client() -> &'static reqwest::Client {
+        static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+            reqwest::Client::builder()
+                .pool_max_idle_per_host(5)
+                .build()
+                .unwrap_or_default()
+        });
+        &CLIENT
+    }
+
     fn google_client_id() -> String {
         std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default()
     }
@@ -101,7 +109,7 @@ pub mod server {
             return Redirect::temporary("/login").into_response();
         };
 
-        let client = reqwest::Client::new();
+        let client = http_client();
         let Ok(token_res) = client
             .post("https://oauth2.googleapis.com/token")
             .form(&[
@@ -187,7 +195,7 @@ pub mod server {
     }
 
     async fn refresh_access_token(refresh_token: &str) -> Option<(String, u64)> {
-        let client = reqwest::Client::new();
+        let client = http_client();
         let res = client
             .post("https://oauth2.googleapis.com/token")
             .form(&[
@@ -346,7 +354,7 @@ pub mod server {
     }
 
     pub async fn fetch_dashboard(access_token: &str, days: u64) -> Result<DashboardData, String> {
-        let client = reqwest::Client::new();
+        let client = http_client();
 
         let sites_res = client
             .get("https://www.googleapis.com/webmasters/v3/sites")
@@ -469,13 +477,94 @@ pub mod server {
         })
     }
 
+    /// Fetch analytics for a single GSC property (avoids fetching all sites).
+    pub async fn fetch_property(
+        access_token: &str,
+        site_url: &str,
+        days: u64,
+    ) -> Result<PropertyData, String> {
+        let client = http_client();
+        let (start_date, end_date) = date_range(days);
+
+        let body = serde_json::json!({
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["date"],
+            "rowLimit": 500,
+        });
+
+        let res = client
+            .post(format!(
+                "https://www.googleapis.com/webmasters/v3/sites/{}/searchAnalytics/query",
+                urlencoding::encode(site_url)
+            ))
+            .bearer_auth(access_token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(format!("GSC API error {status}: {body}"));
+        }
+
+        let data: GscAnalyticsResponse = res.json().await.map_err(|e| e.to_string())?;
+
+        let total_clicks: f64 = data.rows.iter().map(|r| r.clicks).sum();
+        let total_impressions: f64 = data.rows.iter().map(|r| r.impressions).sum();
+        let avg_ctr = if total_impressions > 0.0 {
+            total_clicks / total_impressions
+        } else {
+            0.0
+        };
+        let avg_position = if data.rows.is_empty() {
+            0.0
+        } else {
+            data.rows.iter().map(|r| r.position).sum::<f64>() / data.rows.len() as f64
+        };
+
+        let daily: Vec<DailyRow> = data
+            .rows
+            .iter()
+            .map(|r| {
+                let ctr = if r.impressions > 0.0 {
+                    r.clicks / r.impressions
+                } else {
+                    0.0
+                };
+                DailyRow {
+                    date: r.keys.first().cloned().unwrap_or_default(),
+                    clicks: r.clicks,
+                    impressions: r.impressions,
+                    ctr,
+                    position: r.position,
+                    ga_sessions: None,
+                }
+            })
+            .collect();
+
+        Ok(PropertyData {
+            site_url: site_url.to_string(),
+            permission_level: String::new(),
+            clicks: total_clicks,
+            impressions: total_impressions,
+            ctr: avg_ctr,
+            position: avg_position,
+            daily,
+            ga_sessions: None,
+            ga_property_id: None,
+        })
+    }
+
     pub async fn fetch_dimension(
         access_token: &str,
         site_url: &str,
         dimension: &str,
         days: u64,
     ) -> Result<Vec<DimensionRow>, String> {
-        let client = reqwest::Client::new();
+        let client = http_client();
         let (start_date, end_date) = date_range(days);
 
         let body = serde_json::json!({
@@ -613,10 +702,8 @@ pub mod server {
     }
 
     /// List all GA4 property IDs with their associated website URLs.
-    async fn list_ga_properties(
-        client: &reqwest::Client,
-        access_token: &str,
-    ) -> Vec<(String, String)> {
+    async fn list_ga_properties(access_token: &str) -> Vec<(String, String)> {
+        let client = http_client();
         let mut page_token: Option<String> = None;
 
         // 1. List all account summaries to get property IDs
@@ -704,7 +791,7 @@ pub mod server {
         metric: &str,
         days: u64,
     ) -> Result<Vec<(String, f64)>, String> {
-        let client = reqwest::Client::new();
+        let client = http_client();
         // GA has near real-time data, fetch through yesterday
         let (start_date, _) = date_range(days);
 
@@ -768,8 +855,7 @@ pub mod server {
 
     /// Resolve which GA4 property ID matches a GSC site URL.
     pub async fn resolve_ga_property(access_token: &str, site_url: &str) -> Option<String> {
-        let client = reqwest::Client::new();
-        let ga_props = list_ga_properties(&client, access_token).await;
+        let ga_props = list_ga_properties(access_token).await;
         let normalized_site = normalize_url_for_match(site_url);
 
         if !site_url.is_empty() {

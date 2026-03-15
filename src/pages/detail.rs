@@ -1,6 +1,7 @@
 use crate::api::{DailyRow, DimensionRow, PropertyData};
 use crate::app::{DashboardCache, DetailCache, DimensionCache};
 use crate::pages::login::LoginPage;
+use crate::pages::DayButton;
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
 
@@ -14,13 +15,9 @@ pub async fn fetch_property_detail(
         .await
         .ok_or_else(|| ServerFnError::new("Not authenticated"))?;
     crate::api::server::apply_session_cookie(&session);
-    let data = crate::api::server::fetch_dashboard(&session.access_token, days)
+    let mut prop = crate::api::server::fetch_property(&session.access_token, &site_url, days)
         .await
         .map_err(ServerFnError::new)?;
-    let mut prop = data.properties
-        .into_iter()
-        .find(|p| p.site_url == site_url)
-        .ok_or_else(|| ServerFnError::new("Property not found"))?;
     prop.ga_property_id =
         crate::api::server::resolve_ga_property(&session.access_token, &site_url).await;
     Ok(prop)
@@ -201,15 +198,6 @@ pub fn DetailPage() -> impl IntoView {
     };
     let ga_property_id = RwSignal::new(initial_ga_id);
 
-    Effect::new(move || {
-        if let Some(Ok(prop)) = data.get() {
-            if prop.ga_property_id.is_some() {
-                ga_property_id.set(prop.ga_property_id.clone());
-            }
-            cache.set(Some((site_url(), days.get_untracked(), prop)));
-        }
-    });
-
     let gsc_url = move || {
         let url = site_url();
         let encoded = urlencoding::encode(&url);
@@ -244,28 +232,17 @@ pub fn DetailPage() -> impl IntoView {
             <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
                 {move || data.get().map(|result| match result {
                     Err(e) if e.to_string().contains("Not authenticated") => view! { <LoginPage/> }.into_any(),
-                    Ok(prop) => view! { <DetailContent prop=prop site_url=site_url() days=days.get() ga_data=ga_data_sig ga_loading=ga_loading ga_metric=ga_metric set_ga_metric=set_ga_metric/> }.into_any(),
+                    Ok(prop) => {
+                        if prop.ga_property_id.is_some() {
+                            ga_property_id.set(prop.ga_property_id.clone());
+                        }
+                        cache.set(Some((site_url(), days.get_untracked(), prop.clone())));
+                        view! { <DetailContent prop=prop site_url=site_url() days=days.get() ga_data=ga_data_sig ga_loading=ga_loading ga_metric=ga_metric set_ga_metric=set_ga_metric/> }.into_any()
+                    }
                     Err(e) => view! { <div class="error-text">{e.to_string()}</div> }.into_any(),
                 })}
             </Suspense>
         </div>
-    }
-}
-
-#[component]
-fn DayButton(days: ReadSignal<u64>, set_days: WriteSignal<u64>, value: u64) -> impl IntoView {
-    let active = move || days.get() == value;
-    let handle_click = move |_| set_days.set(value);
-    let label = format!("{value}d");
-
-    view! {
-        <button
-            class:day-btn=true
-            class:day-btn-active=active
-            on:click=handle_click
-        >
-            {label}
-        </button>
     }
 }
 
@@ -1071,19 +1048,6 @@ fn DimensionTabs(site_url: String, days: u64) -> impl IntoView {
         },
     );
 
-    Effect::new(move || {
-        if let Some(Ok(rows)) = dim_data.get() {
-            let key = (
-                site_for_effect.clone(),
-                active_tab.get_untracked(),
-                days,
-            );
-            dim_cache.update(|m| {
-                m.insert(key, rows);
-            });
-        }
-    });
-
     view! {
         <div class="chart-card">
             <div class="dim-tabs">
@@ -1106,6 +1070,14 @@ fn DimensionTabs(site_url: String, days: u64) -> impl IntoView {
             <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
                 {move || dim_data.get().map(|result| match result {
                     Ok(rows) => {
+                        let key = (
+                            site_for_effect.clone(),
+                            active_tab.get_untracked(),
+                            days,
+                        );
+                        dim_cache.update(|m| {
+                            m.insert(key, rows.clone());
+                        });
                         let tab = active_tab.get();
                         let col_label = match tab.as_str() {
                             "query" => "Query",
