@@ -188,6 +188,16 @@ pub fn DetailPage() -> impl IntoView {
         format!("https://search.google.com/search-console/performance/search-analytics?resource_id={encoded}")
     };
 
+    let ga_url = move || {
+        data.get()
+            .and_then(|r| r.ok())
+            .and_then(|prop| prop.ga_property_id)
+            .map(|id| {
+                let numeric_id = id.strip_prefix("properties/").unwrap_or(&id).to_owned();
+                format!("https://analytics.google.com/analytics/web/#/p{numeric_id}/reports/")
+            })
+    };
+
     view! {
         <div class="container">
             <header class="dash-header">
@@ -195,6 +205,9 @@ pub fn DetailPage() -> impl IntoView {
                     <a href="/" class="back-link">"< Back"</a>
                     <h1>{move || clean_url(&site_url())}</h1>
                     <a href={gsc_url} target="_blank" rel="noopener" class="gsc-link">"Open in GSC"</a>
+                    {move || ga_url().map(|url| view! {
+                        <a href={url} target="_blank" rel="noopener" class="gsc-link">"Open in GA"</a>
+                    })}
                 </div>
                 <div class="day-buttons">
                     <DayButton days=days set_days=set_days value=7/>
