@@ -17,10 +17,13 @@ pub async fn fetch_property_detail(
     let data = crate::api::server::fetch_dashboard(&session.access_token, days)
         .await
         .map_err(ServerFnError::new)?;
-    data.properties
+    let mut prop = data.properties
         .into_iter()
         .find(|p| p.site_url == site_url)
-        .ok_or_else(|| ServerFnError::new("Property not found"))
+        .ok_or_else(|| ServerFnError::new("Property not found"))?;
+    prop.ga_property_id =
+        crate::api::server::resolve_ga_property(&session.access_token, &site_url).await;
+    Ok(prop)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -104,6 +107,7 @@ pub fn DetailPage() -> impl IntoView {
     let cache = expect_context::<DetailCache>();
     let dash_cache = expect_context::<DashboardCache>();
     let ga_cache = expect_context::<crate::app::GaCache>();
+    let dashboard_ga_cache = expect_context::<crate::app::DashboardGaCache>();
     let (days, set_days) = signal(28u64);
 
     // Active GA metric (None = off, Some("sessions") etc.)
@@ -134,6 +138,7 @@ pub fn DetailPage() -> impl IntoView {
             return;
         }
 
+        ga_data_sig.set(None);
         ga_loading.set(true);
         leptos::task::spawn_local(async move {
             leptos::logging::log!("[ga-client] fetching {} for {}", metric, url);
@@ -176,8 +181,31 @@ pub fn DetailPage() -> impl IntoView {
         },
     );
 
+    // Seed detail GA cache from dashboard GA cache
+    let initial_ga_id = if let Some((cached_days, ref map)) = dashboard_ga_cache.get_untracked() {
+        if let Some(ga_data) = map.get(&site_url()) {
+            // Pre-populate sessions data so clicking "Sessions" is instant
+            let sessions_data = GaSessionsData {
+                property_id: ga_data.property_id.clone(),
+                daily: ga_data.daily_dated.clone(),
+                total: ga_data.total,
+            };
+            let key = (site_url(), cached_days, "sessions".to_string());
+            ga_cache.update(|m| { m.insert(key, Some(sessions_data)); });
+            Some(ga_data.property_id.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let ga_property_id = RwSignal::new(initial_ga_id);
+
     Effect::new(move || {
         if let Some(Ok(prop)) = data.get() {
+            if prop.ga_property_id.is_some() {
+                ga_property_id.set(prop.ga_property_id.clone());
+            }
             cache.set(Some((site_url(), days.get_untracked(), prop)));
         }
     });
@@ -189,13 +217,10 @@ pub fn DetailPage() -> impl IntoView {
     };
 
     let ga_url = move || {
-        data.get()
-            .and_then(|r| r.ok())
-            .and_then(|prop| prop.ga_property_id)
-            .map(|id| {
-                let numeric_id = id.strip_prefix("properties/").unwrap_or(&id).to_owned();
-                format!("https://analytics.google.com/analytics/web/#/p{numeric_id}/reports/")
-            })
+        ga_property_id.get().map(|id| {
+            let numeric_id = id.strip_prefix("properties/").unwrap_or(&id).to_owned();
+            format!("https://analytics.google.com/analytics/web/#/p{numeric_id}/reports/")
+        })
     };
 
     view! {
@@ -219,7 +244,7 @@ pub fn DetailPage() -> impl IntoView {
             <Suspense fallback=|| view! { <div class="loading">"Loading..."</div> }>
                 {move || data.get().map(|result| match result {
                     Err(e) if e.to_string().contains("Not authenticated") => view! { <LoginPage/> }.into_any(),
-                    Ok(prop) => view! { <DetailContent prop=prop site_url=site_url() days=days.get() ga_data=ga_data_sig _ga_loading=ga_loading ga_metric=ga_metric set_ga_metric=set_ga_metric/> }.into_any(),
+                    Ok(prop) => view! { <DetailContent prop=prop site_url=site_url() days=days.get() ga_data=ga_data_sig ga_loading=ga_loading ga_metric=ga_metric set_ga_metric=set_ga_metric/> }.into_any(),
                     Err(e) => view! { <div class="error-text">{e.to_string()}</div> }.into_any(),
                 })}
             </Suspense>
@@ -287,7 +312,7 @@ fn DetailContent(
     site_url: String,
     days: u64,
     ga_data: RwSignal<Option<GaSessionsData>>,
-    _ga_loading: RwSignal<bool>,
+    ga_loading: RwSignal<bool>,
     ga_metric: ReadSignal<Option<String>>,
     set_ga_metric: WriteSignal<Option<String>>,
 ) -> impl IntoView {
@@ -415,6 +440,7 @@ fn DetailContent(
             set_ga_metric=set_ga_metric
             show_ga=show_ga
             ga_color=ga_color
+            ga_loading=ga_loading
             clicks_max=clicks_max
             impressions_max=impressions_max
             gsc_date_count=gsc_date_count
@@ -481,6 +507,7 @@ fn DetailChart(
     set_ga_metric: WriteSignal<Option<String>>,
     show_ga: impl Fn() -> bool + Copy + Send + Sync + 'static,
     ga_color: impl Fn() -> String + Copy + Send + Sync + 'static,
+    ga_loading: RwSignal<bool>,
     clicks_max: f64,
     impressions_max: f64,
     gsc_date_count: usize,
@@ -550,6 +577,7 @@ fn DetailChart(
                 show_ctr=show_ctr set_show_ctr=set_show_ctr
                 show_position=show_position set_show_position=set_show_position
                 ga_metric=ga_metric set_ga_metric=set_ga_metric
+                ga_loading=ga_loading
             />
             <ChartBody
                 lines=lines
@@ -883,6 +911,7 @@ fn ChartToggles(
     set_show_position: WriteSignal<bool>,
     ga_metric: ReadSignal<Option<String>>,
     set_ga_metric: WriteSignal<Option<String>>,
+    ga_loading: RwSignal<bool>,
 ) -> impl IntoView {
     view! {
         <div class="chart-toggles-row">
@@ -893,6 +922,9 @@ fn ChartToggles(
                 <MetricToggle label="Position" color="var(--chart-purple)" active=show_position set_active=set_show_position/>
             </div>
             <div class="chart-toggles ga-toggles">
+                {move || ga_loading.get().then(|| view! {
+                    <div class="ga-spinner"></div>
+                })}
                 {GA_METRICS.iter().map(|(key, label, color)| {
                     let key = key.to_string();
                     let key_for_check = key.clone();

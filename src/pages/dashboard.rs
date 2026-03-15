@@ -28,6 +28,9 @@ pub async fn fetch_gsc_data(days: u64) -> Result<DashboardData, ServerFnError> {
 pub struct GaPropertyData {
     pub total: f64,
     pub daily: Vec<f64>,
+    /// (date, value) pairs for detail view reuse
+    pub daily_dated: Vec<(String, f64)>,
+    pub property_id: String,
 }
 
 /// Fetch GA sessions for all properties (total + daily for sparkline)
@@ -58,7 +61,7 @@ pub async fn fetch_all_ga_sessions(
                 if let Ok(rows) = daily {
                     let total: f64 = rows.iter().map(|(_, s)| s).sum();
                     let values: Vec<f64> = rows.iter().map(|(_, s)| *s).collect();
-                    return Some((url, GaPropertyData { total, daily: values }));
+                    return Some((url, GaPropertyData { total, daily: values, daily_dated: rows, property_id: pid }));
                 }
             }
             None
@@ -184,6 +187,7 @@ fn DashboardContent(
         .get_untracked()
         .filter(|(d, _)| *d == days)
         .is_some();
+    let ga_loading = RwSignal::new(!cached && !urls.is_empty());
     if !urls.is_empty() && !cached {
         Effect::new(move |_| {
             let urls = urls.clone();
@@ -191,6 +195,7 @@ fn DashboardContent(
                 if let Ok(map) = fetch_all_ga_sessions(urls, days).await {
                     ga_cache.set(Some((days, map)));
                 }
+                ga_loading.set(false);
             });
         });
     }
@@ -215,6 +220,7 @@ fn DashboardContent(
             totals=data.totals
             label=label
             total_ga_sessions=total_ga_sessions
+            ga_loading=ga_loading
         />
         <h2>{format!("Properties ({count})")}</h2>
         <PropertyTable properties=data.properties ga_map=ga_map/>
@@ -226,6 +232,7 @@ fn StatsGrid(
     totals: crate::api::GscMetrics,
     label: String,
     total_ga_sessions: Memo<Option<f64>>,
+    ga_loading: RwSignal<bool>,
 ) -> impl IntoView {
     view! {
         <div class="stats-grid">
@@ -235,7 +242,13 @@ fn StatsGrid(
             <StatCard label="Avg Position" value=format_position(totals.position) sub=String::new()/>
             <div class="stat-card">
                 <div class="stat-label">"Sessions"</div>
-                <div class="stat-value">{move || total_ga_sessions.get().map(format_number).unwrap_or_else(|| "-".into())}</div>
+                <div class="stat-value">{move || {
+                    if ga_loading.get() {
+                        view! { <div class="ga-spinner"></div> }.into_any()
+                    } else {
+                        view! { <span>{total_ga_sessions.get().map(format_number).unwrap_or_else(|| "-".into())}</span> }.into_any()
+                    }
+                }}</div>
                 <div class="stat-sub color-teal">"Google Analytics"</div>
             </div>
         </div>
