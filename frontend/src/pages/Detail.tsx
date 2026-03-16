@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { Helmet } from "react-helmet-async"
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  ReferenceLine,
+} from "recharts"
 import type { PropertyData, DailyRow, DimensionRow, GaSessionsData } from "../types"
 import { fetchPropertyDetail, fetchGaSessions, fetchDimension } from "../lib/api"
 import { formatNumber, formatTipNumber, formatCtr, formatPosition, formatAxisNumber, cleanUrl } from "../lib/format"
-import { buildScaledChartPath } from "../lib/chart"
 import { DayButton } from "../components/DayButton"
 
 let GA_METRICS: [string, string, string][] = [
@@ -16,13 +19,6 @@ let GA_METRICS: [string, string, string][] = [
 ]
 
 type MetricKey = "clicks" | "impressions" | "ctr" | "position"
-
-let METRICS: { key: MetricKey; color: string; accessor: (r: DailyRow) => number }[] = [
-  { key: "clicks", color: "var(--green)", accessor: (r) => r.clicks },
-  { key: "impressions", color: "var(--accent)", accessor: (r) => r.impressions },
-  { key: "ctr", color: "var(--chart-orange)", accessor: (r) => r.ctr },
-  { key: "position", color: "var(--chart-purple)", accessor: (r) => r.position },
-]
 
 export let Detail = () => {
   let { site } = useParams<{ site: string }>()
@@ -70,7 +66,6 @@ export let Detail = () => {
     return () => { cancelled = true }
   }, [siteUrl, days, navigate])
 
-  // Fetch GA data when metric changes
   useEffect(() => {
     if (!gaMetric || !siteUrl) {
       setGaData(null)
@@ -150,7 +145,6 @@ let DetailContent = ({
 }) => {
   let daily = prop.daily
   let gscDates = useMemo(() => daily.map((r) => r.date), [daily])
-  let gscDateCount = gscDates.length
 
   let showGa = gaMetric !== null
   let gaColor = useMemo(() => {
@@ -158,7 +152,6 @@ let DetailContent = ({
     return found ? found[2] : "var(--chart-teal)"
   }, [gaMetric])
 
-  // Extra GA dates beyond GSC range
   let extraGaDates = useMemo(() => {
     if (!gaData) return []
     let gscSet = new Set(gscDates)
@@ -169,34 +162,29 @@ let DetailContent = ({
       .sort()
   }, [gaData, gscDates])
 
-  let numDays = showGa ? gscDateCount + extraGaDates.length : gscDateCount
-
-  // Pre-compute chart lines
-  let lines = useMemo(() => METRICS.map((m) => {
-    let values = daily.map(m.accessor)
-    let maxVal = Math.max(...values, 0)
-    let safeMax = maxVal === 0 ? 1 : maxVal
-    let yPcts = values.map((v) => v / safeMax * 0.9 + 0.05)
-    return { key: m.key, color: m.color, maxVal, yPcts }
-  }), [daily])
-
-  let gscPaths = useMemo(() => lines.map((l) => buildScaledChartPath(l.yPcts, numDays)), [lines, numDays])
-
-  let clicksMax = lines.find((l) => l.key === "clicks")?.maxVal ?? 0
-  let impressionsMax = lines.find((l) => l.key === "impressions")?.maxVal ?? 0
-
-  // GA chart line
-  let gaChart = useMemo(() => {
-    if (!gaData) return null
-    let gaByDate = new Map(gaData.daily)
-    let values = gscDates.map((d) => gaByDate.get(d) ?? 0)
-    for (let d of extraGaDates) values.push(gaByDate.get(d) ?? 0)
-    let maxVal = Math.max(...values, 0)
-    let safeMax = maxVal === 0 ? 1 : maxVal
-    let yPcts = values.map((v) => v / safeMax * 0.9 + 0.05)
-    let path = buildScaledChartPath(yPcts, values.length)
-    return { path, maxVal, yPcts, values }
-  }, [gaData, gscDates, extraGaDates])
+  // Build merged chart data
+  let chartData = useMemo(() => {
+    let gaByDate = gaData ? new Map(gaData.daily) : new Map<string, number>()
+    let rows = daily.map((r) => ({
+      date: r.date,
+      clicks: r.clicks,
+      impressions: r.impressions,
+      ctr: r.ctr,
+      position: r.position,
+      ga: gaByDate.get(r.date) ?? undefined,
+    }))
+    for (let d of extraGaDates) {
+      rows.push({
+        date: d,
+        clicks: undefined as any,
+        impressions: undefined as any,
+        ctr: undefined as any,
+        position: undefined as any,
+        ga: gaByDate.get(d) ?? undefined,
+      })
+    }
+    return rows
+  }, [daily, gaData, extraGaDates])
 
   let gaTotal = gaData?.total ?? null
 
@@ -221,8 +209,6 @@ let DetailContent = ({
     return formatNumber(gaTotal)
   }, [gaTotal, gaMetric, gaData])
 
-  let [hoverIdx, setHoverIdx] = useState<number | null>(null)
-
   return (
     <>
       <div className="stats-grid">
@@ -239,23 +225,12 @@ let DetailContent = ({
       </div>
 
       <DetailChart
-        lines={lines}
-        gscPaths={gscPaths}
-        gscLineCount={gscDateCount}
-        numDays={numDays}
-        gaChart={gaChart}
+        chartData={chartData}
         gaMetric={gaMetric}
         setGaMetric={setGaMetric}
         showGa={showGa}
         gaColor={gaColor}
         gaLoading={gaLoading}
-        clicksMax={clicksMax}
-        impressionsMax={impressionsMax}
-        gscDateCount={gscDateCount}
-        extraGaDates={extraGaDates}
-        daily={daily}
-        hoverIdx={hoverIdx}
-        setHoverIdx={setHoverIdx}
       />
 
       <DimensionTabs siteUrl={siteUrl} days={days} />
@@ -263,77 +238,85 @@ let DetailContent = ({
   )
 }
 
-type ChartLine = { key: MetricKey; color: string; maxVal: number; yPcts: number[] }
-type GaChartData = { path: string; maxVal: number; yPcts: number[]; values: number[] }
+type ChartRow = {
+  date: string
+  clicks: number
+  impressions: number
+  ctr: number
+  position: number
+  ga?: number
+}
+
+let ChartTooltipContent = ({ active, payload, label, showClicks, showImpressions, showCtr, showPosition, showGa, gaMetric, gaColor }: any) => {
+  if (!active || !payload?.length) return null
+  let data: Record<string, number> = {}
+  for (let p of payload) data[p.dataKey] = p.value
+
+  let formatGaVal = (v: number) => {
+    if (gaMetric === "bounceRate") return `${(v * 100).toFixed(1)}%`
+    if (gaMetric === "averageSessionDuration") return `${v.toFixed(0)}s`
+    return formatTipNumber(v)
+  }
+
+  return (
+    <div className="chart-tooltip chart-tooltip-inline">
+      <div className="tooltip-date">{label}</div>
+      {showClicks && data.clicks !== undefined && (
+        <div className="tooltip-row">
+          <span className="tooltip-dot" style={{ background: "var(--green)" }} />
+          <span className="tooltip-label">Clicks</span>
+          <span className="tooltip-val">{formatTipNumber(data.clicks)}</span>
+        </div>
+      )}
+      {showImpressions && data.impressions !== undefined && (
+        <div className="tooltip-row">
+          <span className="tooltip-dot" style={{ background: "var(--accent)" }} />
+          <span className="tooltip-label">Impressions</span>
+          <span className="tooltip-val">{formatTipNumber(data.impressions)}</span>
+        </div>
+      )}
+      {showCtr && data.ctr !== undefined && (
+        <div className="tooltip-row">
+          <span className="tooltip-dot" style={{ background: "var(--chart-orange)" }} />
+          <span className="tooltip-label">CTR</span>
+          <span className="tooltip-val">{formatCtr(data.ctr)}</span>
+        </div>
+      )}
+      {showPosition && data.position !== undefined && (
+        <div className="tooltip-row">
+          <span className="tooltip-dot" style={{ background: "var(--chart-purple)" }} />
+          <span className="tooltip-label">Position</span>
+          <span className="tooltip-val">{formatPosition(data.position)}</span>
+        </div>
+      )}
+      {showGa && data.ga !== undefined && (
+        <div className="tooltip-row">
+          <span className="tooltip-dot" style={{ background: gaColor }} />
+          <span className="tooltip-label">{GA_METRICS.find(([k]) => k === gaMetric)?.[1] ?? "GA"}</span>
+          <span className="tooltip-val">{formatGaVal(data.ga)}</span>
+        </div>
+      )}
+    </div>
+  )
+}
 
 let DetailChart = ({
-  lines, gscPaths, gscLineCount, numDays, gaChart,
-  gaMetric, setGaMetric, showGa, gaColor, gaLoading,
-  clicksMax, impressionsMax, gscDateCount, extraGaDates, daily,
-  hoverIdx, setHoverIdx,
+  chartData, gaMetric, setGaMetric, showGa, gaColor, gaLoading,
 }: {
-  lines: ChartLine[]
-  gscPaths: string[]
-  gscLineCount: number
-  numDays: number
-  gaChart: GaChartData | null
+  chartData: ChartRow[]
   gaMetric: string | null
   setGaMetric: (m: string | null) => void
   showGa: boolean
   gaColor: string
   gaLoading: boolean
-  clicksMax: number
-  impressionsMax: number
-  gscDateCount: number
-  extraGaDates: string[]
-  daily: DailyRow[]
-  hoverIdx: number | null
-  setHoverIdx: (idx: number | null) => void
 }) => {
   let [showClicks, setShowClicks] = useState(true)
   let [showImpressions, setShowImpressions] = useState(true)
   let [showCtr, setShowCtr] = useState(false)
   let [showPosition, setShowPosition] = useState(false)
 
-  let chartRef = useRef<HTMLDivElement>(null)
-
-  let handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    let el = chartRef.current
-    if (!el) return
-    let x = e.nativeEvent.offsetX
-    let w = el.offsetWidth
-    if (w <= 0 || numDays === 0) { setHoverIdx(null); return }
-    let ratio = Math.min(1, Math.max(0, x / w))
-    let idx = Math.min(numDays - 1, Math.round(ratio * (numDays - 1)))
-    setHoverIdx(idx)
-  }, [numDays, setHoverIdx])
-
-  let handleMouseLeave = useCallback(() => setHoverIdx(null), [setHoverIdx])
-
-  let crosshairPct = hoverIdx !== null && numDays > 1
-    ? hoverIdx / (numDays - 1) * 100
-    : null
-
-  let tooltipContent = useMemo(() => {
-    if (hoverIdx === null) return null
-    if (hoverIdx < gscDateCount) {
-      let row = daily[hoverIdx]
-      if (!row) return null
-      return { date: row.date, clicks: row.clicks, impressions: row.impressions, ctr: row.ctr, position: row.position }
-    }
-    let extraIdx = hoverIdx - gscDateCount
-    let date = extraGaDates[extraIdx]
-    if (!date) return null
-    return { date, clicks: null as number | null, impressions: null as number | null, ctr: null as number | null, position: null as number | null }
-  }, [hoverIdx, gscDateCount, daily, extraGaDates])
-
-  let isVisible = (key: MetricKey) => {
-    if (key === "clicks") return showClicks
-    if (key === "impressions") return showImpressions
-    if (key === "ctr") return showCtr
-    if (key === "position") return showPosition
-    return false
-  }
+  let clicksMax = useMemo(() => Math.max(...chartData.map((r) => r.clicks ?? 0), 0), [chartData])
+  let impressionsMax = useMemo(() => Math.max(...chartData.map((r) => r.impressions ?? 0), 0), [chartData])
 
   return (
     <div className="chart-card">
@@ -362,7 +345,6 @@ let DetailChart = ({
         </div>
       </div>
 
-      {/* Axis labels */}
       <div className="chart-axis-labels">
         <span className="axis-title color-green" style={{ display: showClicks ? "block" : "none" }}>Clicks</span>
         <span className="axis-title-spacer" />
@@ -370,145 +352,123 @@ let DetailChart = ({
       </div>
 
       <div className="chart-container">
-        {/* Left axis */}
-        <div className="chart-axis chart-axis-left" style={{ visibility: showClicks ? "visible" : "hidden" }}>
-          <span className="axis-label color-green">{formatAxisNumber(clicksMax)}</span>
-          <span className="axis-label color-green">{formatAxisNumber(clicksMax / 2)}</span>
-          <span className="axis-label color-green">0</span>
-        </div>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={chartData} margin={{ top: 10, right: 50, bottom: 0, left: 50 }}>
+            <XAxis dataKey="date" hide />
 
-        {/* Chart area */}
-        <div
-          className="chart-area"
-          ref={chartRef}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-        >
-          <svg className="full-chart" viewBox="0 0 800 200" preserveAspectRatio="none">
-            <line x1="0" y1="10" x2="800" y2="10" stroke="var(--border)" strokeWidth="0.5" style={{ vectorEffect: "non-scaling-stroke" }} />
-            <line x1="0" y1="100" x2="800" y2="100" stroke="var(--border)" strokeWidth="0.5" style={{ vectorEffect: "non-scaling-stroke" }} />
-            <line x1="0" y1="190" x2="800" y2="190" stroke="var(--border)" strokeWidth="0.5" style={{ vectorEffect: "non-scaling-stroke" }} />
-
-            {lines.map((line, i) => {
-              let visible = isVisible(line.key)
-              let fillClose = (() => {
-                let n = line.yPcts.length
-                let lastX = numDays > 1 && n > 0 ? (n - 1) / (numDays - 1) * 800 : 0
-                return `${gscPaths[i]} L${lastX.toFixed(1)},200 L0,200 Z`
-              })()
-              return (
-                <g key={line.key} style={{ display: visible ? "block" : "none" }}>
-                  <path d={fillClose} fill={line.color} opacity="0.08" />
-                  <path d={gscPaths[i]} fill="none" stroke={line.color} strokeWidth="2" style={{ vectorEffect: "non-scaling-stroke" }} />
-                </g>
-              )
-            })}
-
-            {showGa && gaChart && (
-              <g>
-                <path d={`${gaChart.path} L800,200 L0,200 Z`} fill={gaColor} opacity="0.08" />
-                <path d={gaChart.path} fill="none" stroke={gaColor} strokeWidth="2" style={{ vectorEffect: "non-scaling-stroke" }} />
-              </g>
-            )}
-          </svg>
-
-          {/* Crosshair */}
-          {crosshairPct !== null && (
-            <div className="chart-crosshair" style={{ left: `${crosshairPct}%` }} />
-          )}
-
-          {/* GSC dots */}
-          {lines.map((line) => {
-            let visible = isVisible(line.key)
-            let inRange = hoverIdx !== null && hoverIdx < gscLineCount
-            let y = hoverIdx !== null ? (line.yPcts[hoverIdx] ?? 0.5) : 0.5
-            return (
-              <div
-                key={line.key}
-                className="chart-dot"
-                style={{
-                  display: inRange && visible ? "block" : "none",
-                  left: crosshairPct !== null ? `${crosshairPct}%` : "0%",
-                  top: `${(1 - y) * 100}%`,
-                  background: line.color,
-                }}
-              />
-            )
-          })}
-
-          {/* GA dot */}
-          {showGa && gaChart && hoverIdx !== null && (
-            <div
-              className="chart-dot"
-              style={{
-                display: "block",
-                left: crosshairPct !== null ? `${crosshairPct}%` : "0%",
-                top: `${(1 - (gaChart.yPcts[hoverIdx] ?? 0.5)) * 100}%`,
-                background: gaColor,
-              }}
+            {/* Left axis: clicks */}
+            <YAxis
+              yAxisId="clicks"
+              orientation="left"
+              hide={!showClicks}
+              tick={{ fill: "var(--green)", fontSize: 10, fontFamily: "var(--mono)" }}
+              tickFormatter={formatAxisNumber}
+              width={44}
+              domain={[0, "dataMax"]}
+              allowDataOverflow
             />
-          )}
 
-          {/* Tooltip */}
-          {tooltipContent && crosshairPct !== null && (
-            <div
-              className={`chart-tooltip${crosshairPct > 70 ? " tooltip-right" : ""}`}
-              style={{ left: `${crosshairPct}%` }}
-            >
-              <div className="tooltip-date">{tooltipContent.date}</div>
-              {showClicks && tooltipContent.clicks !== null && (
-                <div className="tooltip-row">
-                  <span className="tooltip-dot" style={{ background: "var(--green)" }} />
-                  <span className="tooltip-label">Clicks</span>
-                  <span className="tooltip-val">{formatTipNumber(tooltipContent.clicks)}</span>
-                </div>
-              )}
-              {showImpressions && tooltipContent.impressions !== null && (
-                <div className="tooltip-row">
-                  <span className="tooltip-dot" style={{ background: "var(--accent)" }} />
-                  <span className="tooltip-label">Impressions</span>
-                  <span className="tooltip-val">{formatTipNumber(tooltipContent.impressions)}</span>
-                </div>
-              )}
-              {showCtr && tooltipContent.ctr !== null && (
-                <div className="tooltip-row">
-                  <span className="tooltip-dot" style={{ background: "var(--chart-orange)" }} />
-                  <span className="tooltip-label">CTR</span>
-                  <span className="tooltip-val">{formatCtr(tooltipContent.ctr)}</span>
-                </div>
-              )}
-              {showPosition && tooltipContent.position !== null && (
-                <div className="tooltip-row">
-                  <span className="tooltip-dot" style={{ background: "var(--chart-purple)" }} />
-                  <span className="tooltip-label">Position</span>
-                  <span className="tooltip-val">{formatPosition(tooltipContent.position)}</span>
-                </div>
-              )}
-              {showGa && gaChart && (
-                <div className="tooltip-row">
-                  <span className="tooltip-dot" style={{ background: gaColor }} />
-                  <span className="tooltip-label">{GA_METRICS.find(([k]) => k === gaMetric)?.[1] ?? "GA"}</span>
-                  <span className="tooltip-val">
-                    {(() => {
-                      let v = gaChart.values[hoverIdx ?? 0]
-                      if (v === undefined) return ""
-                      if (gaMetric === "bounceRate") return `${(v * 100).toFixed(1)}%`
-                      if (gaMetric === "averageSessionDuration") return `${v.toFixed(0)}s`
-                      return formatTipNumber(v)
-                    })()}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            {/* Right axis: impressions */}
+            <YAxis
+              yAxisId="impressions"
+              orientation="right"
+              hide={!showImpressions}
+              tick={{ fill: "var(--accent)", fontSize: 10, fontFamily: "var(--mono)" }}
+              tickFormatter={formatAxisNumber}
+              width={44}
+              domain={[0, "dataMax"]}
+              allowDataOverflow
+            />
 
-        {/* Right axis */}
-        <div className="chart-axis chart-axis-right" style={{ visibility: showImpressions ? "visible" : "hidden" }}>
-          <span className="axis-label color-accent">{formatAxisNumber(impressionsMax)}</span>
-          <span className="axis-label color-accent">{formatAxisNumber(impressionsMax / 2)}</span>
-          <span className="axis-label color-accent">0</span>
-        </div>
+            {/* Hidden axes for independent scaling */}
+            <YAxis yAxisId="ctr" hide domain={[0, "dataMax"]} />
+            <YAxis yAxisId="position" hide reversed domain={[0, "dataMax"]} />
+            <YAxis yAxisId="ga" hide domain={[0, "dataMax"]} />
+
+            <ReferenceLine yAxisId="clicks" y={0} stroke="var(--border)" strokeWidth={0.5} />
+
+            <Tooltip
+              content={
+                <ChartTooltipContent
+                  showClicks={showClicks}
+                  showImpressions={showImpressions}
+                  showCtr={showCtr}
+                  showPosition={showPosition}
+                  showGa={showGa}
+                  gaMetric={gaMetric}
+                  gaColor={gaColor}
+                />
+              }
+              cursor={{ stroke: "var(--text-muted)", strokeWidth: 1, opacity: 0.5 }}
+            />
+
+            {showClicks && (
+              <Line
+                yAxisId="clicks"
+                type="linear"
+                dataKey="clicks"
+                stroke="var(--green)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: "var(--green)", stroke: "var(--bg)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showImpressions && (
+              <Line
+                yAxisId="impressions"
+                type="linear"
+                dataKey="impressions"
+                stroke="var(--accent)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: "var(--accent)", stroke: "var(--bg)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showCtr && (
+              <Line
+                yAxisId="ctr"
+                type="linear"
+                dataKey="ctr"
+                stroke="var(--chart-orange)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: "var(--chart-orange)", stroke: "var(--bg)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showPosition && (
+              <Line
+                yAxisId="position"
+                type="linear"
+                dataKey="position"
+                stroke="var(--chart-purple)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: "var(--chart-purple)", stroke: "var(--bg)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showGa && (
+              <Line
+                yAxisId="ga"
+                type="linear"
+                dataKey="ga"
+                stroke={gaColor}
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, fill: gaColor, stroke: "var(--bg)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )

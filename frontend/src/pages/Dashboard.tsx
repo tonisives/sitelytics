@@ -4,7 +4,6 @@ import { Helmet } from "react-helmet-async"
 import type { DashboardData, GaPropertyData } from "../types"
 import { fetchGscData, fetchAllGaSessions, logout } from "../lib/api"
 import { formatNumber, formatCtr, formatPosition, cleanUrl } from "../lib/format"
-import { buildSparklinePath, buildSparklineFromValues } from "../lib/chart"
 import { DayButton } from "../components/DayButton"
 import { StatCard } from "../components/StatCard"
 import { SparklineTooltip, OverlaySparklineTooltip } from "../components/Sparkline"
@@ -151,8 +150,6 @@ let PropertyTable = ({ properties, gaMap }: { properties: DashboardData["propert
 
 let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData }) => {
   let href = `/property/${encodeURIComponent(property.site_url)}`
-  let clicksPath = buildSparklinePath(property.daily, (r) => r.clicks)
-  let impressionsPath = buildSparklinePath(property.daily, (r) => r.impressions)
 
   let overlayData = useMemo(
     () => property.daily.map((r) => [r.date, r.clicks, r.impressions] as [string, number, number]),
@@ -160,7 +157,6 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
   )
   let dates = useMemo(() => property.daily.map((r) => r.date), [property.daily])
 
-  let gaSparkPath = gaData ? buildSparklineFromValues(gaData.daily) : ""
   let gaSparkData = useMemo(
     () => gaData ? dates.map((d, i) => [d, gaData.daily[i] ?? 0] as [string, number]) : [],
     [dates, gaData],
@@ -181,8 +177,6 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
       <td className="sparkline-cell">
         <OverlaySparklineTooltip
           href={href}
-          pathA={clicksPath}
-          pathB={impressionsPath}
           colorA="var(--green)"
           colorB="var(--accent)"
           data={overlayData}
@@ -191,10 +185,9 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
         />
       </td>
       <td className="sparkline-cell">
-        {gaData && gaSparkPath ? (
+        {gaData && gaSparkData.length > 0 ? (
           <SparklineTooltip
             href={href}
-            path={gaSparkPath}
             color="var(--chart-teal)"
             data={gaSparkData}
             label="Sessions"
