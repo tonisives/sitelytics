@@ -1,38 +1,46 @@
-FROM rust:1.93-slim AS builder
+# -- Rust API build --
+FROM rust:1.93-slim AS rust-builder
 
-RUN apt-get update && apt-get install -y pkg-config libssl-dev perl make && rm -rf /var/lib/apt/lists/*
-RUN rustup target add wasm32-unknown-unknown
-RUN cargo install cargo-leptos
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy dependency manifests first to cache dep compilation
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
-COPY style/main.css style/main.css
+RUN mkdir src && echo 'fn main() {}' > src/main.rs
+RUN cargo build --release 2>/dev/null; exit 0
 
-# Create dummy sources for dep caching
-RUN mkdir src && \
-    echo 'fn main() {}' > src/main.rs && \
-    echo '' > src/lib.rs
-RUN cargo leptos build --release 2>/dev/null; exit 0
+COPY src src
+RUN touch src/main.rs && cargo build --release
 
-# Copy real source and rebuild
-COPY . .
-RUN touch src/main.rs src/lib.rs
-RUN cargo leptos build --release
+# -- Frontend build --
+FROM node:22-slim AS frontend-builder
 
-FROM debian:bookworm-slim
+RUN corepack enable && corepack prepare pnpm@10 --activate
+
+WORKDIR /app/frontend
+
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY frontend .
+RUN pnpm build
+
+# -- Runtime --
+FROM node:22-slim
 
 RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/sitelytics ./
-COPY --from=builder /app/target/site ./target/site
-COPY --from=builder /app/Cargo.toml ./
+COPY --from=rust-builder /app/target/release/sitelytics ./sitelytics
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+COPY --from=frontend-builder /app/frontend/node_modules ./frontend/node_modules
+COPY --from=frontend-builder /app/frontend/package.json ./frontend/package.json
 
-ENV LEPTOS_SITE_ADDR="0.0.0.0:19000"
-ENV LEPTOS_SITE_ROOT="target/site"
+ENV API_BASE_URL="http://localhost:19100"
+ENV API_PORT="19100"
+ENV NODE_ENV="production"
+ENV PORT="19000"
 EXPOSE 19000
 
-CMD ["./sitelytics"]
+CMD ./sitelytics & cd frontend && node dist/fastify/server/index.js
