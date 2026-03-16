@@ -1,0 +1,38 @@
+{
+  "name": "sitelytics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --watch-path=server server/dev.ts",
+    "dev:client": "rsbuild dev",
+    "build:fastify": "node --import tsx scripts/build-server.ts",
+    "build": "rsbuild build && pnpm build:fastify",
+    "start": "NODE_ENV=production node dist/fastify/server/index.js"
+  },
+  "dependencies": {
+    "@fastify/middie": "^9.0.0",
+    "@fastify/static": "^8.0.0",
+    "fastify": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-helmet-async": "^2.0.5",
+    "react-router-dom": "^7.1.1"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "^1.6.7",
+    "@rsbuild/plugin-react": "^1.4.2",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "esbuild": "^0.27.3",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@10.28.2+sha512.41872f037ad22f7348e3b1debbaf7e867cfd448f2726d9cf74c08f19507c31d2c8e7a11525b983febc2df640b5438dee6023ebb1f84ed43cc2d654d2bc326264",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

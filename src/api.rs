@@ -30,7 +30,6 @@ pub struct PropertyData {
     pub daily: Vec<DailyRow>,
     #[serde(default)]
     pub ga_sessions: Option<f64>,
-    /// GA4 property ID for this site, if matched
     #[serde(default)]
     pub ga_property_id: Option<String>,
 }
@@ -51,7 +50,6 @@ pub struct DimensionRow {
     pub position: f64,
 }
 
-#[cfg(feature = "ssr")]
 pub mod server {
     use super::*;
     use axum::extract::Query;
@@ -94,7 +92,7 @@ pub mod server {
 
     #[derive(Deserialize)]
     pub struct CallbackParams {
-        code: Option<String>,
+        pub code: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -167,7 +165,6 @@ pub mod server {
 
     pub struct SessionData {
         pub access_token: String,
-        /// Set when the token was refreshed and the cookie needs updating
         pub updated_cookie: Option<String>,
     }
 
@@ -237,7 +234,6 @@ pub mod server {
     pub async fn extract_session(headers: &http::HeaderMap) -> Option<SessionData> {
         let raw = parse_session_cookie(headers)?;
 
-        // Token still valid (with 60s buffer)
         if now_secs() + 60 < raw.expires_at {
             return Some(SessionData {
                 access_token: raw.access_token,
@@ -245,7 +241,6 @@ pub mod server {
             });
         }
 
-        // Token expired, try refresh
         if raw.refresh_token.is_empty() {
             eprintln!("[auth] token expired, no refresh token");
             return None;
@@ -261,16 +256,6 @@ pub mod server {
             access_token: new_token,
             updated_cookie: Some(cookie),
         })
-    }
-
-    /// Call after extract_session to set the refreshed cookie if needed
-    pub fn apply_session_cookie(session: &SessionData) {
-        if let Some(cookie) = &session.updated_cookie {
-            if let Ok(val) = cookie.parse() {
-                let response = leptos::prelude::expect_context::<leptos_axum::ResponseOptions>();
-                response.insert_header(http::header::SET_COOKIE, val);
-            }
-        }
     }
 
     #[derive(Deserialize)]
@@ -477,7 +462,6 @@ pub mod server {
         })
     }
 
-    /// Fetch analytics for a single GSC property (avoids fetching all sites).
     pub async fn fetch_property(
         access_token: &str,
         site_url: &str,
@@ -636,7 +620,6 @@ pub mod server {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct GaPropertySummary {
-        /// Format: "properties/123456"
         property: String,
     }
 
@@ -691,7 +674,6 @@ pub mod server {
         value: String,
     }
 
-    /// Normalizes a URL for comparison: strips protocol, www, trailing slash
     fn normalize_url_for_match(url: &str) -> String {
         url.trim_start_matches("sc-domain:")
             .trim_start_matches("https://")
@@ -701,12 +683,10 @@ pub mod server {
             .to_lowercase()
     }
 
-    /// List all GA4 property IDs with their associated website URLs.
     async fn list_ga_properties(access_token: &str) -> Vec<(String, String)> {
         let client = http_client();
         let mut page_token: Option<String> = None;
 
-        // 1. List all account summaries to get property IDs
         let mut property_ids: Vec<String> = Vec::new();
         loop {
             let mut url =
@@ -743,7 +723,6 @@ pub mod server {
             property_ids.len()
         );
 
-        // 2. Fetch data streams in parallel
         let mut tasks = tokio::task::JoinSet::new();
         for prop_id in property_ids {
             let client = client.clone();
@@ -784,7 +763,6 @@ pub mod server {
         result
     }
 
-    /// Fetch daily values for a GA4 metric for a given property ID and date range.
     pub async fn fetch_ga_daily_metric(
         access_token: &str,
         property_id: &str,
@@ -792,7 +770,6 @@ pub mod server {
         days: u64,
     ) -> Result<Vec<(String, f64)>, String> {
         let client = http_client();
-        // GA has near real-time data, fetch through yesterday
         let (start_date, _) = date_range(days);
 
         let body = serde_json::json!({
@@ -829,7 +806,6 @@ pub mod server {
             .filter_map(|r| {
                 let date_raw = r.dimension_values.first()?.value.clone();
                 let val: f64 = r.metric_values.first()?.value.parse().unwrap_or(0.0);
-                // GA returns date as YYYYMMDD, convert to YYYY-MM-DD
                 if date_raw.len() == 8 {
                     let formatted = format!(
                         "{}-{}-{}",
@@ -847,13 +823,14 @@ pub mod server {
         Ok(rows)
     }
 
-    /// Fetch daily sessions from GA4 (convenience wrapper).
     pub async fn fetch_ga_daily_sessions(
-        access_token: &str,property_id: &str, days: u64,) -> Result<Vec<(String, f64)>, String> {
+        access_token: &str,
+        property_id: &str,
+        days: u64,
+    ) -> Result<Vec<(String, f64)>, String> {
         fetch_ga_daily_metric(access_token, property_id, "sessions", days).await
     }
 
-    /// Resolve which GA4 property ID matches a GSC site URL.
     pub async fn resolve_ga_property(access_token: &str, site_url: &str) -> Option<String> {
         let ga_props = list_ga_properties(access_token).await;
         let normalized_site = normalize_url_for_match(site_url);
