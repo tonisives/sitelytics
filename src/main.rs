@@ -182,16 +182,15 @@ async fn api_ga_dashboard(
         return (axum::http::StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
     };
 
-    // Pre-warm the GA property cache
-    let _ = api::server::resolve_ga_property(&session.access_token, "").await;
+    let ga_props = api::server::list_ga_props(&session.access_token).await;
 
     let mut tasks = tokio::task::JoinSet::new();
     for url in body.site_urls {
         let token = session.access_token.clone();
         let d = days;
+        let pid = api::server::resolve_ga_from_list(&ga_props, &url);
         tasks.spawn(async move {
-            let prop_id = api::server::resolve_ga_property(&token, &url).await;
-            if let Some(pid) = prop_id {
+            if let Some(pid) = pid {
                 let daily = api::server::fetch_ga_daily_sessions(&token, &pid, d).await;
                 if let Ok(rows) = daily {
                     let total: f64 = rows.iter().map(|(_, s)| s).sum();

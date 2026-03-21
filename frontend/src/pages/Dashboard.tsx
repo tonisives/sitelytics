@@ -157,10 +157,11 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
   )
   let dates = useMemo(() => property.daily.map((r) => r.date), [property.daily])
 
-  let gaSparkData = useMemo(
-    () => gaData ? dates.map((d, i) => [d, gaData.daily[i] ?? 0] as [string, number]) : [],
-    [dates, gaData],
-  )
+  let gaSparkData = useMemo(() => {
+    if (!gaData) return []
+    let byDate = new Map(gaData.daily_dated)
+    return dates.map((d) => [d, byDate.get(d) ?? 0] as [string, number])
+  }, [dates, gaData])
 
   return (
     <tr className="prop-row-link">

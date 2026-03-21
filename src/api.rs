@@ -831,6 +831,25 @@ pub mod server {
         fetch_ga_daily_metric(access_token, property_id, "sessions", days).await
     }
 
+    pub async fn list_ga_props(access_token: &str) -> Vec<(String, String)> {
+        list_ga_properties(access_token).await
+    }
+
+    pub fn resolve_ga_from_list(
+        ga_props: &[(String, String)],
+        site_url: &str,
+    ) -> Option<String> {
+        let normalized_site = normalize_url_for_match(site_url);
+        ga_props
+            .iter()
+            .find(|(_, ga_url)| {
+                *ga_url == normalized_site
+                    || normalized_site.contains(ga_url.as_str())
+                    || ga_url.contains(normalized_site.as_str())
+            })
+            .map(|(id, _)| id.clone())
+    }
+
     pub async fn resolve_ga_property(access_token: &str, site_url: &str) -> Option<String> {
         let ga_props = list_ga_properties(access_token).await;
         let normalized_site = normalize_url_for_match(site_url);
