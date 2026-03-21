@@ -4,9 +4,9 @@ A combined Google Search Console and Google Analytics dashboard. Built with Rust
 
 Aggregates SEO and traffic metrics across multiple web properties into a single view - impressions, clicks, CTR, average position, and GA4 sessions.
 
-![Dashboard view](etc/assets/list-view.png)
+![Dashboard view](https://cdn.tonis.dev/sitelytics/list-view.png)
 
-![Property detail view](etc/assets/detail-view.png)
+![Property detail view](https://cdn.tonis.dev/sitelytics/details-impressions-and-sessions.png)
 
 ## Features
 

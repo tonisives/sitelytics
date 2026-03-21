@@ -1,0 +1,48 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+build:
+  tagPolicy:
+    customTemplate:
+      template: "d{{.DATE}}-{{.SHA}}"
+      components:
+        - name: DATE
+          dateTime:
+            format: "2006-01-02-1504"
+            timezone: "Local"
+        - name: SHA
+          gitCommit:
+            variant: AbbrevCommitSha
+  artifacts:
+    - image: registry.tonisives.com/sitelytics/web
+      context: .
+      docker:
+        dockerfile: etc/k8s/Dockerfile
+        buildArgs:
+          PLATFORM: linux/amd64
+        cacheFrom:
+          - registry.tonisives.com/sitelytics/web
+manifests:
+  rawYaml:
+    - etc/k8s/deployment.yaml
+    - etc/k8s/service.yaml
+    - etc/k8s/ingress.yaml
+
+deploy:
+  kubeContext: tgs
+  kubectl:
+    defaultNamespace: "tonis-dev"
+    hooks:
+      after:
+        - host:
+            command:
+              [
+                "sh",
+                "-c",
+                "TAG=d$(date +%Y%m%d-%H%M%S) && git tag -f $TAG && git push origin $TAG -f",
+              ]
+
+profiles:
+  - name: ci
+    deploy:
+      kubectl:
+        hooks: {}

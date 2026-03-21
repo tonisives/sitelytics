@@ -315,8 +315,25 @@ let DetailChart = ({
   let [showCtr, setShowCtr] = useState(false)
   let [showPosition, setShowPosition] = useState(false)
 
-  let clicksMax = useMemo(() => Math.max(...chartData.map((r) => r.clicks ?? 0), 0), [chartData])
-  let impressionsMax = useMemo(() => Math.max(...chartData.map((r) => r.impressions ?? 0), 0), [chartData])
+  let gaLabel = useMemo(() => GA_METRICS.find(([k]) => k === gaMetric)?.[1] ?? "GA", [gaMetric])
+
+  // Determine which metrics get the visible left/right ruler axes
+  // Priority for left: clicks > impressions
+  // Priority for right: impressions (if clicks takes left) > ga
+  // When clicks is off and ga is on, impressions moves to left, ga takes right
+  let leftMetric = showClicks ? "clicks" as const
+    : showImpressions ? "impressions" as const
+    : null
+  let rightMetric = leftMetric === "clicks" && showImpressions ? "impressions" as const
+    : leftMetric === "clicks" && showGa ? "ga" as const
+    : leftMetric === "impressions" && showGa ? "ga" as const
+    : leftMetric !== "impressions" && showImpressions ? "impressions" as const
+    : null
+
+  let axisColor = (m: "clicks" | "impressions" | "ga") =>
+    m === "clicks" ? "var(--green)" : m === "impressions" ? "var(--accent)" : gaColor
+  let axisLabel = (m: "clicks" | "impressions" | "ga") =>
+    m === "clicks" ? "Clicks" : m === "impressions" ? "Impressions" : gaLabel
 
   return (
     <div className="chart-card">
@@ -346,9 +363,9 @@ let DetailChart = ({
       </div>
 
       <div className="chart-axis-labels">
-        <span className="axis-title color-green" style={{ display: showClicks ? "block" : "none" }}>Clicks</span>
+        {leftMetric && <span className="axis-title" style={{ color: axisColor(leftMetric) }}>{axisLabel(leftMetric)}</span>}
         <span className="axis-title-spacer" />
-        <span className="axis-title color-accent" style={{ display: showImpressions ? "block" : "none" }}>Impressions</span>
+        {rightMetric && <span className="axis-title" style={{ color: axisColor(rightMetric) }}>{axisLabel(rightMetric)}</span>}
       </div>
 
       <div className="chart-container">
@@ -356,11 +373,11 @@ let DetailChart = ({
           <LineChart data={chartData} margin={{ top: 10, right: 50, bottom: 0, left: 50 }}>
             <XAxis dataKey="date" hide />
 
-            {/* Left axis: clicks */}
+            {/* Left axis */}
             <YAxis
               yAxisId="clicks"
-              orientation="left"
-              hide={!showClicks}
+              orientation={leftMetric === "clicks" ? "left" : "right"}
+              hide={!showClicks || (leftMetric !== "clicks" && rightMetric !== "clicks")}
               tick={{ fill: "var(--green)", fontSize: 10, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}
@@ -368,11 +385,10 @@ let DetailChart = ({
               allowDataOverflow
             />
 
-            {/* Right axis: impressions */}
             <YAxis
               yAxisId="impressions"
-              orientation="right"
-              hide={!showImpressions}
+              orientation={leftMetric === "impressions" ? "left" : "right"}
+              hide={!showImpressions || (leftMetric !== "impressions" && rightMetric !== "impressions")}
               tick={{ fill: "var(--accent)", fontSize: 10, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}
@@ -383,7 +399,16 @@ let DetailChart = ({
             {/* Hidden axes for independent scaling */}
             <YAxis yAxisId="ctr" hide domain={[0, "dataMax"]} />
             <YAxis yAxisId="position" hide reversed domain={[0, "dataMax"]} />
-            <YAxis yAxisId="ga" hide domain={[0, "dataMax"]} />
+            <YAxis
+              yAxisId="ga"
+              orientation={leftMetric === "ga" ? "left" : "right"}
+              hide={!showGa || (leftMetric !== "ga" && rightMetric !== "ga")}
+              tick={{ fill: gaColor, fontSize: 10, fontFamily: "var(--mono)" }}
+              tickFormatter={formatAxisNumber}
+              width={44}
+              domain={[0, "dataMax"]}
+              allowDataOverflow
+            />
 
             <ReferenceLine yAxisId="clicks" y={0} stroke="var(--border)" strokeWidth={0.5} />
 

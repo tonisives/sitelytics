@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sitelytics-web
+  namespace: tonis-dev
+  labels:
+    app: sitelytics-web
+spec:
+  type: ClusterIP
+  selector:
+    app: sitelytics-web
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http

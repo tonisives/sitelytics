@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sitelytics-web
+  namespace: tonis-dev
+  labels:
+    app: sitelytics-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sitelytics-web
+  template:
+    metadata:
+      labels:
+        app: sitelytics-web
+    spec:
+      containers:
+        - name: sitelytics-web
+          image: registry.tonisives.com/sitelytics/web
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+      imagePullSecrets:
+        - name: tonisives-registry-secret

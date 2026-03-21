@@ -258,7 +258,7 @@ h2 {
 
 /* Sparklines */
 .sparkline-header {
-  width: 100px;
+  width: 160px;
   text-align: right;
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -270,7 +270,7 @@ h2 {
 }
 
 .sparkline-cell {
-  width: 100px;
+  width: 160px;
   padding: 0.65rem 1rem;
   border-bottom: 1px solid var(--border);
   text-align: right;

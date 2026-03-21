@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sitelytics-web
+  namespace: tonis-dev
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - sitelytics.tonis.dev
+      secretName: sitelytics-web-tls
+  rules:
+    - host: sitelytics.tonis.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sitelytics-web
+                port:
+                  number: 80

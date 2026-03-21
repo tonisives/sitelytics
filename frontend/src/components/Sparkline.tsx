@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { LineChart, Line, Tooltip, ResponsiveContainer, YAxis } from "recharts"
-import { formatNumber } from "../lib/format"
+import { formatNumber, formatAxisNumber } from "../lib/format"
 
 let PortalTooltip = ({ active, payload, coordinate, containerRef, color, dataLabel }: any) => {
   if (!active || !payload?.length || !containerRef?.current) return null
@@ -75,13 +75,24 @@ export let SparklineTooltip = ({
   label: string
 }) => {
   let chartData = useMemo(() => data.map(([date, value]) => ({ date, value })), [data])
+  let maxVal = useMemo(() => Math.max(0, ...data.map(([, v]) => v)), [data])
   let containerRef = useRef<HTMLAnchorElement>(null)
 
   return (
     <a href={href} className="row-link sparkline-tooltip-wrap" ref={containerRef}>
-      <ResponsiveContainer width={80} height={24}>
-        <LineChart data={chartData} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
-          <YAxis hide domain={[0, (max: number) => max || 1]} />
+      <ResponsiveContainer width={140} height={32}>
+        <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <YAxis
+            domain={[0, maxVal || 1]}
+            orientation="right"
+            tick={{ fill: color, fontSize: 8, fontFamily: "var(--mono)" }}
+            tickFormatter={formatAxisNumber}
+            width={28}
+            ticks={maxVal === 0 ? [0] : undefined}
+            tickCount={maxVal === 0 ? undefined : 3}
+            axisLine={false}
+            tickLine={false}
+          />
           <Line
             type="linear"
             dataKey="value"
@@ -117,14 +128,38 @@ export let OverlaySparklineTooltip = ({
     () => data.map(([date, a, b]) => ({ date, a, b })),
     [data],
   )
+  let maxA = useMemo(() => Math.max(0, ...data.map(([, a]) => a)), [data])
+  let maxB = useMemo(() => Math.max(0, ...data.map(([,, b]) => b)), [data])
   let containerRef = useRef<HTMLAnchorElement>(null)
 
   return (
     <a href={href} className="row-link sparkline-tooltip-wrap" ref={containerRef}>
-      <ResponsiveContainer width={80} height={24}>
-        <LineChart data={chartData} margin={{ top: 2, right: 0, bottom: 2, left: 0 }}>
-          <YAxis hide yAxisId="a" domain={[0, (max: number) => max || 1]} />
-          <YAxis hide yAxisId="b" domain={[0, (max: number) => max || 1]} />
+      <ResponsiveContainer width={140} height={32}>
+        <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <YAxis
+            yAxisId="a"
+            domain={[0, maxA || 1]}
+            orientation="left"
+            tick={{ fill: colorA, fontSize: 8, fontFamily: "var(--mono)" }}
+            tickFormatter={formatAxisNumber}
+            width={28}
+            ticks={maxA === 0 ? [0] : undefined}
+            tickCount={maxA === 0 ? undefined : 3}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            yAxisId="b"
+            domain={[0, maxB || 1]}
+            orientation="right"
+            tick={{ fill: colorB, fontSize: 8, fontFamily: "var(--mono)" }}
+            tickFormatter={formatAxisNumber}
+            width={28}
+            ticks={maxB === 0 ? [0] : undefined}
+            tickCount={maxB === 0 ? undefined : 3}
+            axisLine={false}
+            tickLine={false}
+          />
           <Line yAxisId="b" type="linear" dataKey="b" stroke={colorB} strokeWidth={1.5} dot={false} isAnimationActive={false} />
           <Line yAxisId="a" type="linear" dataKey="a" stroke={colorA} strokeWidth={1.5} dot={false} isAnimationActive={false} />
           <Tooltip
