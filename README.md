@@ -1,6 +1,6 @@
 # Sitelytics
 
-A combined Google Search Console and Google Analytics dashboard. Built with Rust, Leptos, and Axum.
+A combined Google Search Console and Google Analytics dashboard. Built with Rust (Axum) backend and React frontend.
 
 Aggregates SEO and traffic metrics across multiple web properties into a single view - impressions, clicks, CTR, average position, and GA4 sessions.
 
@@ -19,17 +19,17 @@ Aggregates SEO and traffic metrics across multiple web properties into a single 
 
 ## Tech stack
 
-- **Leptos 0.8** - full-stack Rust framework with SSR + WASM hydration
-- **Axum 0.8** - async HTTP server
+- **React 19** - frontend with SSR via Fastify
+- **Recharts** - interactive data visualization
+- **Axum 0.8** - Rust async HTTP backend
 - **Google APIs** - Search Console v3, Analytics Admin v1beta, Analytics Data v1beta
-- **Hand-rolled SVG charts** - no charting library dependency
 
 ## Setup
 
 ### Prerequisites
 
 - Rust nightly
-- `cargo-leptos` (`cargo install cargo-leptos`)
+- Node.js 22+ and pnpm
 - A Google Cloud project with OAuth 2.0 credentials and the following APIs enabled:
   - Google Search Console API
   - Google Analytics Admin API
@@ -62,15 +62,18 @@ export APP_URL="http://localhost:19000"  # optional, defaults to this
 ### Run
 
 ```sh
-cargo leptos watch
-```
+# backend
+cargo run
 
-The app starts at `http://localhost:19000`.
+# frontend
+cd frontend && pnpm dev
+```
 
 ### Build for production
 
 ```sh
-cargo leptos build --release
+cargo build --release
+cd frontend && pnpm build
 ```
 
 ## Deployment
@@ -89,19 +92,16 @@ docker run -p 19000:19000 \
 
 ```
 src/
-  main.rs           # SSR entry point, Axum server setup
-  lib.rs            # HTML shell and hydration
-  app.rs            # root component, routing, caching
+  main.rs           # Axum server setup, route definitions
   api.rs            # Google API integration and data types
-  pages/
-    login.rs        # Google OAuth login
-    dashboard.rs    # multi-property overview
-    detail.rs       # single property analytics with charts
-style/
-  main.css          # dark theme styles
+frontend/
+  src/
+    pages/          # React page components (Login, Dashboard, Detail)
+    components/     # Sparkline, StatCard, DayButton
+    lib/            # API client, formatting utilities
+  server/           # Fastify SSR server
 etc/
   deploy/           # Dockerfile, k8s manifests, skaffold config
-  assets/           # screenshots
 ```
 
 ## License
