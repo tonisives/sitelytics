@@ -66,22 +66,24 @@ let PortalOverlayTooltip = ({ active, payload, coordinate, containerRef, colorA,
 }
 
 export let SparklineTooltip = ({
-  href, color, data, label,
+  href, color, data, label, globalMax,
 }: {
   href: string
   path?: string
   color: string
   data: [string, number][]
   label: string
+  globalMax?: number
 }) => {
   let chartData = useMemo(() => data.map(([date, value]) => ({ date, value })), [data])
-  let maxVal = useMemo(() => Math.max(0, ...data.map(([, v]) => v)), [data])
+  let maxVal = globalMax ?? Math.max(0, ...data.map(([, v]) => v))
   let containerRef = useRef<HTMLAnchorElement>(null)
 
   return (
     <a href={href} className="row-link sparkline-tooltip-wrap" ref={containerRef}>
       <ResponsiveContainer width={140} height={32}>
         <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <CartesianGrid horizontal vertical={false} stroke="var(--border)" strokeOpacity={0.4} />
           <YAxis
             domain={[0, maxVal || 1]}
             orientation="right"
@@ -113,7 +115,7 @@ export let SparklineTooltip = ({
 }
 
 export let OverlaySparklineTooltip = ({
-  href, colorA, colorB, data, labelA, labelB,
+  href, colorA, colorB, data, labelA, labelB, globalMaxA, globalMaxB,
 }: {
   href: string
   pathA?: string
@@ -123,19 +125,22 @@ export let OverlaySparklineTooltip = ({
   data: [string, number, number][]
   labelA: string
   labelB: string
+  globalMaxA?: number
+  globalMaxB?: number
 }) => {
   let chartData = useMemo(
     () => data.map(([date, a, b]) => ({ date, a, b })),
     [data],
   )
-  let maxA = useMemo(() => Math.max(0, ...data.map(([, a]) => a)), [data])
-  let maxB = useMemo(() => Math.max(0, ...data.map(([,, b]) => b)), [data])
+  let maxA = globalMaxA ?? Math.max(0, ...data.map(([, a]) => a))
+  let maxB = globalMaxB ?? Math.max(0, ...data.map(([,, b]) => b))
   let containerRef = useRef<HTMLAnchorElement>(null)
 
   return (
     <a href={href} className="row-link sparkline-tooltip-wrap" ref={containerRef}>
       <ResponsiveContainer width={140} height={32}>
         <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <CartesianGrid horizontal vertical={false} stroke="var(--border)" strokeOpacity={0.4} />
           <YAxis
             yAxisId="a"
             domain={[0, maxA || 1]}

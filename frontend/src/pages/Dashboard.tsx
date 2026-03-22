@@ -15,6 +15,7 @@ export let Dashboard = () => {
   let [loading, setLoading] = useState(true)
   let [gaMap, setGaMap] = useState<Record<string, GaPropertyData>>({})
   let [gaLoading, setGaLoading] = useState(false)
+  let [normalized, setNormalized] = useState(false)
   let navigate = useNavigate()
 
   // Cache dashboard data per days
@@ -78,6 +79,14 @@ export let Dashboard = () => {
     window.location.href = "/"
   }, [])
 
+  let globalMax = useMemo(() => {
+    if (!normalized || !data) return undefined
+    let maxClicks = Math.max(0, ...data.properties.map((p) => Math.max(0, ...p.daily.map((r) => r.clicks))))
+    let maxImpressions = Math.max(0, ...data.properties.map((p) => Math.max(0, ...p.daily.map((r) => r.impressions))))
+    let maxSessions = Math.max(0, ...Object.values(gaMap).flatMap((g) => g.daily))
+    return { clicks: maxClicks, impressions: maxImpressions, sessions: maxSessions }
+  }, [normalized, data, gaMap])
+
   if (loading && !data) return <div className="loading">Loading...</div>
   if (error) return <div className="container"><div className="error-text">{error}</div></div>
   if (!data) return null
@@ -118,13 +127,22 @@ export let Dashboard = () => {
         </div>
       </div>
 
-      <h2>Properties ({data.properties.length})</h2>
-      <PropertyTable properties={data.properties} gaMap={gaMap} />
+      <div className="table-header-row">
+        <h2>Properties ({data.properties.length})</h2>
+        <button
+          className={`toggle-btn${normalized ? " active" : ""}`}
+          onClick={() => setNormalized((n) => !n)}
+          title="Scale all sparklines to the same axis"
+        >Scale</button>
+      </div>
+      <PropertyTable properties={data.properties} gaMap={gaMap} globalMax={globalMax} />
     </div>
   )
 }
 
-let PropertyTable = ({ properties, gaMap }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData> }) => (
+type GlobalMax = { clicks: number; impressions: number; sessions: number }
+
+let PropertyTable = ({ properties, gaMap, globalMax }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; globalMax?: GlobalMax }) => (
   <div className="table-card">
     <table className="prop-table">
       <thead>
@@ -141,14 +159,14 @@ let PropertyTable = ({ properties, gaMap }: { properties: DashboardData["propert
       </thead>
       <tbody>
         {properties.map((p) => (
-          <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} />
+          <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} globalMax={globalMax} />
         ))}
       </tbody>
     </table>
   </div>
 )
 
-let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData }) => {
+let PropertyRow = ({ property, gaData, globalMax }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData; globalMax?: GlobalMax }) => {
   let href = `/property/${encodeURIComponent(property.site_url)}`
 
   let overlayData = useMemo(
@@ -184,6 +202,8 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
           data={overlayData}
           labelA="Clicks"
           labelB="Impressions"
+          globalMaxA={globalMax?.clicks}
+          globalMaxB={globalMax?.impressions}
         />
       </td>
       <td className="sparkline-cell">
@@ -193,6 +213,7 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
             color="var(--chart-teal)"
             data={gaSparkData}
             label="Sessions"
+            globalMax={globalMax?.sessions}
           />
         ) : (
           <a href={href} className="row-link"><span /></a>
