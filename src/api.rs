@@ -108,7 +108,7 @@ pub mod server {
         };
 
         let client = http_client();
-        let Ok(token_res) = client
+        let token_res = match client
             .post("https://oauth2.googleapis.com/token")
             .form(&[
                 ("code", code.as_str()),
@@ -119,12 +119,21 @@ pub mod server {
             ])
             .send()
             .await
-        else {
-            return Redirect::temporary("/login").into_response();
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[auth] token request failed: {e}");
+                return Redirect::temporary("/login").into_response();
+            }
         };
 
-        let Ok(tokens) = token_res.json::<TokenResponse>().await else {
-            return Redirect::temporary("/login").into_response();
+        let body = token_res.text().await.unwrap_or_default();
+        let tokens: TokenResponse = match serde_json::from_str(&body) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[auth] token parse failed: {e} body={body}");
+                return Redirect::temporary("/login").into_response();
+            }
         };
 
         let session_data = serde_json::json!({
