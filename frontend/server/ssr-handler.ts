@@ -5,7 +5,7 @@ export let ssrHandler = async (req: FastifyRequest, reply: FastifyReply) => {
   let url = req.url
 
   let [path] = url.split("?")
-  if (path.startsWith("/.well-known/") || path.startsWith("/favicon")) {
+  if (path.startsWith("/.well-known/") || path.startsWith("/favicon") || path.startsWith("/src/")) {
     return reply.code(404).send("")
   }
 

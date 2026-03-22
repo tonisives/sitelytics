@@ -159,6 +159,7 @@ async fn api_ga_metric(
         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     };
     let total: f64 = daily.iter().map(|(_, s)| s).sum();
+    eprintln!("[ga-metric] site_url={:?} pid={property_id} metric={:?} rows={} total={total}", q.site_url, q.metric, daily.len());
     let data = serde_json::json!({
         "property_id": property_id,
         "daily": daily,
@@ -183,6 +184,7 @@ async fn api_ga_dashboard(
     };
 
     let ga_props = api::server::list_ga_props(&session.access_token).await;
+    eprintln!("[ga-dashboard] received {} site_urls: {:?}", body.site_urls.len(), body.site_urls);
 
     let mut tasks = tokio::task::JoinSet::new();
     for url in body.site_urls {
@@ -192,6 +194,10 @@ async fn api_ga_dashboard(
         tasks.spawn(async move {
             if let Some(pid) = pid {
                 let daily = api::server::fetch_ga_daily_sessions(&token, &pid, d).await;
+                match &daily {
+                    Ok(rows) => eprintln!("[ga-dashboard] url={url:?} pid={pid} rows={} data={rows:?}", rows.len()),
+                    Err(e) => eprintln!("[ga-dashboard] url={url:?} pid={pid} error={e}"),
+                }
                 if let Ok(rows) = daily {
                     let total: f64 = rows.iter().map(|(_, s)| s).sum();
                     let values: Vec<f64> = rows.iter().map(|(_, s)| *s).collect();
@@ -205,6 +211,8 @@ async fn api_ga_dashboard(
                         }),
                     ));
                 }
+            } else {
+                eprintln!("[ga-dashboard] url={url:?} no GA match");
             }
             None
         });

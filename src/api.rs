@@ -840,14 +840,22 @@ pub mod server {
         site_url: &str,
     ) -> Option<String> {
         let normalized_site = normalize_url_for_match(site_url);
-        ga_props
+        let result = ga_props
             .iter()
-            .find(|(_, ga_url)| {
-                *ga_url == normalized_site
-                    || normalized_site.contains(ga_url.as_str())
-                    || ga_url.contains(normalized_site.as_str())
-            })
-            .map(|(id, _)| id.clone())
+            .find(|(_, ga_url)| *ga_url == normalized_site)
+            .map(|(id, _)| id.clone());
+        if result.is_none() && !site_url.is_empty() {
+            eprintln!(
+                "[ga-resolve-list] no match for site_url={:?} normalized={:?} ga_props={:?}",
+                site_url,
+                normalized_site,
+                ga_props
+                    .iter()
+                    .map(|(id, u)| (id.as_str(), u.as_str()))
+                    .collect::<Vec<_>>()
+            );
+        }
+        result
     }
 
     pub async fn resolve_ga_property(access_token: &str, site_url: &str) -> Option<String> {
@@ -868,11 +876,7 @@ pub mod server {
 
         ga_props
             .into_iter()
-            .find(|(_, ga_url)| {
-                *ga_url == normalized_site
-                    || normalized_site.contains(ga_url.as_str())
-                    || ga_url.contains(normalized_site.as_str())
-            })
+            .find(|(_, ga_url)| *ga_url == normalized_site)
             .map(|(id, _)| id)
     }
 }

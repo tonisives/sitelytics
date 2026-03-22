@@ -160,7 +160,8 @@ let PropertyRow = ({ property, gaData }: { property: DashboardData["properties"]
   let gaSparkData = useMemo(() => {
     if (!gaData) return []
     let byDate = new Map(gaData.daily_dated)
-    return dates.map((d) => [d, byDate.get(d) ?? 0] as [string, number])
+    let allDates = new Set([...dates, ...gaData.daily_dated.map(([d]) => d)])
+    return [...allDates].sort().map((d) => [d, byDate.get(d) ?? 0] as [string, number])
   }, [dates, gaData])
 
   return (

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from "react"
 import { createPortal } from "react-dom"
-import { LineChart, Line, Tooltip, ResponsiveContainer, YAxis } from "recharts"
+import { LineChart, Line, Tooltip, ResponsiveContainer, YAxis, CartesianGrid } from "recharts"
 import { formatNumber, formatAxisNumber } from "../lib/format"
 
 let PortalTooltip = ({ active, payload, coordinate, containerRef, color, dataLabel }: any) => {
