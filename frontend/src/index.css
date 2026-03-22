@@ -150,8 +150,10 @@ h2 {
 
 .table-header-row {
   display: flex;
+  width: 100%;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 0.75rem;
 }
 .table-header-row h2 { margin: 0; }
 
