@@ -5,26 +5,69 @@
 }
 
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface-hover: #222632;
-  --border: #2a2e3a;
-  --text: #e1e4eb;
-  --text-muted: #8b90a0;
-  --accent: #6c8aff;
-  --accent-dim: #3d5afe;
-  --green: #4caf7a;
-  --red: #e5534b;
-  --chart-orange: #e8a838;
-  --chart-purple: #b388ff;
-  --chart-teal: #26a69a;
-  --chart-pink: #e57399;
+  --bg: #f8f7f5;
+  --surface: #ffffff;
+  --surface-hover: #f2f1ee;
+  --border: #e2e0db;
+  --text: #1a1a18;
+  --text-muted: #6b6963;
+  --accent: #5e4cbf;
+  --accent-dim: #4a3a9e;
+  --green: #3d8a4e;
+  --red: #c44040;
+  --chart-orange: #c07e2a;
+  --chart-purple: #7a5cc0;
+  --chart-teal: #2a8577;
+  --chart-pink: #b85575;
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", "Fira Code", monospace;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] {
+  --bg: #111110;
+  --surface: #1c1c1a;
+  --surface-hover: #252523;
+  --border: #2e2e2b;
+  --text: #e8e6e1;
+  --text-muted: #908e87;
+  --accent: #7c6bdb;
+  --accent-dim: #5e4cbf;
+  --green: #5a9f68;
+  --red: #d4564e;
+  --chart-orange: #d4943a;
+  --chart-purple: #a07ee0;
+  --chart-teal: #3d9e8f;
+  --chart-pink: #d06b8a;
+  --shadow-card: none;
+  --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111110;
+    --surface: #1c1c1a;
+    --surface-hover: #252523;
+    --border: #2e2e2b;
+    --text: #e8e6e1;
+    --text-muted: #908e87;
+    --accent: #7c6bdb;
+    --accent-dim: #5e4cbf;
+    --green: #5a9f68;
+    --red: #d4564e;
+    --chart-orange: #d4943a;
+    --chart-purple: #a07ee0;
+    --chart-teal: #3d9e8f;
+    --chart-pink: #d06b8a;
+    --shadow-card: none;
+    --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
 }
 
 body {
   font-family: var(--font);
+  font-feature-settings: "cv01", "cv02";
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
@@ -119,6 +162,7 @@ h2 {
   color: var(--text-muted);
   font-size: 0.8rem;
   cursor: pointer;
+  box-shadow: var(--shadow-card);
 }
 
 .day-btn:hover {
@@ -140,6 +184,7 @@ h2 {
   color: var(--text-muted);
   font-size: 0.8rem;
   cursor: pointer;
+  box-shadow: var(--shadow-card);
 }
 .toggle-btn:hover { background: var(--surface-hover); color: var(--text); }
 .toggle-btn.active {
@@ -172,6 +217,30 @@ h2 {
   color: var(--text);
 }
 
+.theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.theme-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.theme-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
 /* Stats grid */
 .stats-grid {
   display: grid;
@@ -191,6 +260,7 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1.25rem;
+  box-shadow: var(--shadow-card);
 }
 
 .stat-label {
@@ -205,6 +275,7 @@ h2 {
   font-size: 1.5rem;
   font-weight: 700;
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-sub {
@@ -219,6 +290,7 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
+  box-shadow: var(--shadow-card);
 }
 
 .prop-table {
@@ -263,6 +335,7 @@ h2 {
 
 .num-cell {
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
@@ -307,15 +380,15 @@ h2 {
 }
 
 .sparkline-tip {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 0.4rem 0.6rem;
   font-size: 0.7rem;
   pointer-events: none;
   z-index: 20;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-tooltip);
 }
 
 .sparkline-tip-inline {
@@ -360,6 +433,7 @@ h2 {
   border-radius: 8px;
   padding: 1.25rem;
   margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-card);
 }
 
 .chart-card h2 {
@@ -392,15 +466,15 @@ h2 {
 }
 
 .chart-tooltip {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
   pointer-events: none;
   z-index: 10;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-tooltip);
 }
 
 .chart-tooltip-inline {
@@ -412,6 +486,7 @@ h2 {
   margin-bottom: 0.35rem;
   color: var(--text);
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   font-size: 0.7rem;
 }
 
@@ -437,6 +512,7 @@ h2 {
 .tooltip-val {
   margin-left: auto;
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--text);
   font-size: 0.7rem;
@@ -485,6 +561,7 @@ h2 {
   cursor: pointer;
   color: var(--text-muted);
   transition: all 0.15s;
+  background: transparent;
 }
 
 .metric-toggle-active {

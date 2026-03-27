@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { Helmet } from "react-helmet-async"
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine,
+  ComposedChart, Line, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  ReferenceLine, CartesianGrid,
 } from "recharts"
 import type { PropertyData, DailyRow, DimensionRow, GaSessionsData } from "../types"
 import { fetchPropertyDetail, fetchGaSessions, fetchDimension } from "../lib/api"
 import { formatNumber, formatTipNumber, formatCtr, formatPosition, formatAxisNumber, cleanUrl } from "../lib/format"
 import { DayButton } from "../components/DayButton"
+import { ThemeToggle } from "../components/ThemeToggle"
 
 let GA_METRICS: [string, string, string][] = [
   ["sessions", "Sessions", "var(--chart-teal)"],
@@ -112,10 +113,13 @@ export let Detail = () => {
           <a href={gscUrl} target="_blank" rel="noopener" className="gsc-link">Open in GSC</a>
           {gaUrl && <a href={gaUrl} target="_blank" rel="noopener" className="gsc-link">Open in GA</a>}
         </div>
-        <div className="day-buttons">
-          <DayButton days={days} setDays={setDays} value={7} />
-          <DayButton days={days} setDays={setDays} value={28} />
-          <DayButton days={days} setDays={setDays} value={90} />
+        <div className="dash-controls">
+          <div className="day-buttons">
+            <DayButton days={days} setDays={setDays} value={7} />
+            <DayButton days={days} setDays={setDays} value={28} />
+            <DayButton days={days} setDays={setDays} value={90} />
+          </div>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -370,47 +374,65 @@ let DetailChart = ({
 
       <div className="chart-container">
         <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={chartData} margin={{ top: 10, right: 50, bottom: 0, left: 50 }}>
+          <ComposedChart data={chartData} margin={{ top: 10, right: 50, bottom: 0, left: 50 }}>
+            <defs>
+              <linearGradient id="grad-clicks" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--green)" stopOpacity={0.15} />
+                <stop offset="100%" stopColor="var(--green)" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="grad-impressions" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.15} />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="grad-ga" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={gaColor} stopOpacity={0.15} />
+                <stop offset="100%" stopColor={gaColor} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.3} horizontal vertical={false} />
             <XAxis dataKey="date" hide />
 
-            {/* Left axis */}
             <YAxis
               yAxisId="clicks"
               orientation={leftMetric === "clicks" ? "left" : "right"}
               hide={!showClicks || (leftMetric !== "clicks" && rightMetric !== "clicks")}
-              tick={{ fill: "var(--green)", fontSize: 10, fontFamily: "var(--mono)" }}
+              tick={{ fill: "var(--green)", fontSize: 9, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}
               domain={[0, "dataMax"]}
               allowDataOverflow
+              axisLine={false}
+              tickLine={false}
             />
 
             <YAxis
               yAxisId="impressions"
               orientation={leftMetric === "impressions" ? "left" : "right"}
               hide={!showImpressions || (leftMetric !== "impressions" && rightMetric !== "impressions")}
-              tick={{ fill: "var(--accent)", fontSize: 10, fontFamily: "var(--mono)" }}
+              tick={{ fill: "var(--accent)", fontSize: 9, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}
               domain={[0, "dataMax"]}
               allowDataOverflow
+              axisLine={false}
+              tickLine={false}
             />
 
-            {/* Hidden axes for independent scaling */}
             <YAxis yAxisId="ctr" hide domain={[0, "dataMax"]} />
             <YAxis yAxisId="position" hide reversed domain={[0, "dataMax"]} />
             <YAxis
               yAxisId="ga"
               orientation={leftMetric === "ga" ? "left" : "right"}
               hide={!showGa || (leftMetric !== "ga" && rightMetric !== "ga")}
-              tick={{ fill: gaColor, fontSize: 10, fontFamily: "var(--mono)" }}
+              tick={{ fill: gaColor, fontSize: 9, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}
               domain={[0, "dataMax"]}
               allowDataOverflow
+              axisLine={false}
+              tickLine={false}
             />
-
-            <ReferenceLine yAxisId="clicks" y={0} stroke="var(--border)" strokeWidth={0.5} />
 
             <Tooltip
               content={
@@ -428,14 +450,41 @@ let DetailChart = ({
             />
 
             {showClicks && (
+              <Area
+                yAxisId="clicks"
+                type="monotone"
+                dataKey="clicks"
+                fill="url(#grad-clicks)"
+                stroke="none"
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showClicks && (
               <Line
                 yAxisId="clicks"
-                type="linear"
+                type="monotone"
                 dataKey="clicks"
                 stroke="var(--green)"
                 strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: "var(--green)", stroke: "var(--bg)", strokeWidth: 2 }}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                dot={(props: any) => {
+                  if (props.index !== chartData.length - 1 || props.value === undefined) return <circle key="empty" r={0} />
+                  return <circle key="end" cx={props.cx} cy={props.cy} r={3.5} fill="var(--green)" stroke="var(--surface)" strokeWidth={2} />
+                }}
+                activeDot={{ r: 4, fill: "var(--green)", stroke: "var(--surface)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showImpressions && (
+              <Area
+                yAxisId="impressions"
+                type="monotone"
+                dataKey="impressions"
+                fill="url(#grad-impressions)"
+                stroke="none"
                 isAnimationActive={false}
                 connectNulls={false}
               />
@@ -443,12 +492,17 @@ let DetailChart = ({
             {showImpressions && (
               <Line
                 yAxisId="impressions"
-                type="linear"
+                type="monotone"
                 dataKey="impressions"
                 stroke="var(--accent)"
                 strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: "var(--accent)", stroke: "var(--bg)", strokeWidth: 2 }}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                dot={(props: any) => {
+                  if (props.index !== chartData.length - 1 || props.value === undefined) return <circle key="empty" r={0} />
+                  return <circle key="end" cx={props.cx} cy={props.cy} r={3.5} fill="var(--accent)" stroke="var(--surface)" strokeWidth={2} />
+                }}
+                activeDot={{ r: 4, fill: "var(--accent)", stroke: "var(--surface)", strokeWidth: 2 }}
                 isAnimationActive={false}
                 connectNulls={false}
               />
@@ -456,12 +510,17 @@ let DetailChart = ({
             {showCtr && (
               <Line
                 yAxisId="ctr"
-                type="linear"
+                type="monotone"
                 dataKey="ctr"
                 stroke="var(--chart-orange)"
                 strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: "var(--chart-orange)", stroke: "var(--bg)", strokeWidth: 2 }}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                dot={(props: any) => {
+                  if (props.index !== chartData.length - 1 || props.value === undefined) return <circle key="empty" r={0} />
+                  return <circle key="end" cx={props.cx} cy={props.cy} r={3.5} fill="var(--chart-orange)" stroke="var(--surface)" strokeWidth={2} />
+                }}
+                activeDot={{ r: 4, fill: "var(--chart-orange)", stroke: "var(--surface)", strokeWidth: 2 }}
                 isAnimationActive={false}
                 connectNulls={false}
               />
@@ -469,12 +528,28 @@ let DetailChart = ({
             {showPosition && (
               <Line
                 yAxisId="position"
-                type="linear"
+                type="monotone"
                 dataKey="position"
                 stroke="var(--chart-purple)"
                 strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: "var(--chart-purple)", stroke: "var(--bg)", strokeWidth: 2 }}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                dot={(props: any) => {
+                  if (props.index !== chartData.length - 1 || props.value === undefined) return <circle key="empty" r={0} />
+                  return <circle key="end" cx={props.cx} cy={props.cy} r={3.5} fill="var(--chart-purple)" stroke="var(--surface)" strokeWidth={2} />
+                }}
+                activeDot={{ r: 4, fill: "var(--chart-purple)", stroke: "var(--surface)", strokeWidth: 2 }}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            )}
+            {showGa && (
+              <Area
+                yAxisId="ga"
+                type="monotone"
+                dataKey="ga"
+                fill="url(#grad-ga)"
+                stroke="none"
                 isAnimationActive={false}
                 connectNulls={false}
               />
@@ -482,17 +557,22 @@ let DetailChart = ({
             {showGa && (
               <Line
                 yAxisId="ga"
-                type="linear"
+                type="monotone"
                 dataKey="ga"
                 stroke={gaColor}
                 strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: gaColor, stroke: "var(--bg)", strokeWidth: 2 }}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                dot={(props: any) => {
+                  if (props.index !== chartData.length - 1 || props.value === undefined) return <circle key="empty" r={0} />
+                  return <circle key="end" cx={props.cx} cy={props.cy} r={3.5} fill={gaColor} stroke="var(--surface)" strokeWidth={2} />
+                }}
+                activeDot={{ r: 4, fill: gaColor, stroke: "var(--surface)", strokeWidth: 2 }}
                 isAnimationActive={false}
                 connectNulls={false}
               />
             )}
-          </LineChart>
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>

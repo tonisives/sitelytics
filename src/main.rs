@@ -159,7 +159,9 @@ async fn api_ga_metric(
         Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     };
     let total: f64 = daily.iter().map(|(_, s)| s).sum();
-    eprintln!("[ga-metric] site_url={:?} pid={property_id} metric={:?} rows={} total={total}", q.site_url, q.metric, daily.len());
+    let first_date = daily.first().map(|(d, _)| d.as_str()).unwrap_or("-");
+    let last_date = daily.last().map(|(d, _)| d.as_str()).unwrap_or("-");
+    eprintln!("[ga-metric] site_url={:?} pid={property_id} metric={:?} rows={} total={total} range={first_date}..{last_date}", q.site_url, q.metric, daily.len());
     let data = serde_json::json!({
         "property_id": property_id,
         "daily": daily,
@@ -195,7 +197,11 @@ async fn api_ga_dashboard(
             if let Some(pid) = pid {
                 let daily = api::server::fetch_ga_daily_sessions(&token, &pid, d).await;
                 match &daily {
-                    Ok(rows) => eprintln!("[ga-dashboard] url={url:?} pid={pid} rows={} data={rows:?}", rows.len()),
+                    Ok(rows) => {
+                        let first = rows.first().map(|(d, _)| d.as_str()).unwrap_or("-");
+                        let last = rows.last().map(|(d, _)| d.as_str()).unwrap_or("-");
+                        eprintln!("[ga-dashboard] url={url:?} pid={pid} rows={} range={first}..{last}", rows.len());
+                    }
                     Err(e) => eprintln!("[ga-dashboard] url={url:?} pid={pid} error={e}"),
                 }
                 if let Ok(rows) = daily {

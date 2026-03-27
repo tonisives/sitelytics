@@ -96,10 +96,10 @@ export let SparklineTooltip = ({
             tickLine={false}
           />
           <Line
-            type="linear"
+            type="monotone"
             dataKey="value"
             stroke={color}
-            strokeWidth={1.5}
+            strokeWidth={1.5} strokeLinecap="round"
             dot={false}
             isAnimationActive={false}
           />
@@ -165,8 +165,8 @@ export let OverlaySparklineTooltip = ({
             axisLine={false}
             tickLine={false}
           />
-          <Line yAxisId="b" type="linear" dataKey="b" stroke={colorB} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-          <Line yAxisId="a" type="linear" dataKey="a" stroke={colorA} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+          <Line yAxisId="b" type="monotone" dataKey="b" stroke={colorB} strokeWidth={1.5} strokeLinecap="round" dot={false} isAnimationActive={false} />
+          <Line yAxisId="a" type="monotone" dataKey="a" stroke={colorA} strokeWidth={1.5} strokeLinecap="round" dot={false} isAnimationActive={false} />
           <Tooltip
             content={<PortalOverlayTooltip containerRef={containerRef} colorA={colorA} colorB={colorB} labelA={labelA} labelB={labelB} />}
             cursor={{ stroke: "var(--text-muted)", strokeWidth: 1, opacity: 0.5 }}

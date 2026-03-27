@@ -299,52 +299,67 @@ pub mod server {
         position: f64,
     }
 
+    fn parse_date_to_epoch(s: &str) -> u64 {
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() != 3 { return 0; }
+        let y: i64 = parts[0].parse().unwrap_or(1970);
+        let m: u32 = parts[1].parse().unwrap_or(1);
+        let d: u32 = parts[2].parse().unwrap_or(1);
+
+        let mut total_days: i64 = 0;
+        for yr in 1970..y {
+            let leap = yr % 4 == 0 && (yr % 100 != 0 || yr % 400 == 0);
+            total_days += if leap { 366 } else { 365 };
+        }
+        let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+        let days_in_months: [u32; 12] = [
+            31, if leap { 29 } else { 28 },
+            31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        ];
+        for i in 0..(m as usize - 1).min(11) {
+            total_days += days_in_months[i] as i64;
+        }
+        total_days += (d as i64) - 1;
+        (total_days as u64) * 86400
+    }
+
+    fn format_epoch_date(ts: u64) -> String {
+        let day_secs: u64 = 86400;
+        let days_since_epoch = ts / day_secs;
+        let mut y = 1970i64;
+        let mut remaining = days_since_epoch as i64;
+        loop {
+            let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+            let days_in_year = if leap { 366 } else { 365 };
+            if remaining < days_in_year {
+                break;
+            }
+            remaining -= days_in_year;
+            y += 1;
+        }
+        let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+        let days_in_months: [i64; 12] = [
+            31,
+            if leap { 29 } else { 28 },
+            31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        ];
+        let mut m = 0;
+        for &dim in &days_in_months {
+            if remaining < dim {
+                break;
+            }
+            remaining -= dim;
+            m += 1;
+        }
+        format!("{y}-{:02}-{:02}", m + 1, remaining + 1)
+    }
+
     fn date_range(days: u64) -> (String, String) {
         let now = now_secs();
         let day_secs = 86400;
         let end = now - (3 * day_secs);
         let start = end - (days * day_secs);
-
-        let fmt = |ts: u64| -> String {
-            let days_since_epoch = ts / day_secs;
-            let mut y = 1970i64;
-            let mut remaining = days_since_epoch as i64;
-            loop {
-                let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-                let days_in_year = if leap { 366 } else { 365 };
-                if remaining < days_in_year {
-                    break;
-                }
-                remaining -= days_in_year;
-                y += 1;
-            }
-            let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-            let days_in_months: [i64; 12] = [
-                31,
-                if leap { 29 } else { 28 },
-                31,
-                30,
-                31,
-                30,
-                31,
-                31,
-                30,
-                31,
-                30,
-                31,
-            ];
-            let mut m = 0;
-            for &dim in &days_in_months {
-                if remaining < dim {
-                    break;
-                }
-                remaining -= dim;
-                m += 1;
-            }
-            format!("{y}-{:02}-{:02}", m + 1, remaining + 1)
-        };
-
-        (fmt(start), fmt(end))
+        (format_epoch_date(start), format_epoch_date(end))
     }
 
     pub async fn fetch_dashboard(access_token: &str, days: u64) -> Result<DashboardData, String> {
@@ -692,6 +707,56 @@ pub mod server {
             .to_lowercase()
     }
 
+    async fn fetch_ga_timezone(access_token: &str, property_id: &str) -> i64 {
+        let client = http_client();
+        let url = format!(
+            "https://analyticsadmin.googleapis.com/v1beta/properties/{property_id}"
+        );
+        let res = match client.get(&url).bearer_auth(access_token).send().await {
+            Ok(r) => r,
+            Err(_) => return 0,
+        };
+        if !res.status().is_success() { return 0; }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PropInfo { #[serde(default)] time_zone: String }
+        let info: PropInfo = match res.json().await { Ok(v) => v, Err(_) => return 0 };
+        tz_offset_secs(&info.time_zone)
+    }
+
+    fn tz_offset_secs(tz_name: &str) -> i64 {
+        // Common IANA timezone offsets (standard time, not DST-aware)
+        // GA4 uses property timezone for "yesterday"/"today" semantics
+        match tz_name {
+            "Europe/Tallinn" => 2 * 3600,
+            "Europe/Helsinki" => 2 * 3600,
+            "Europe/Riga" => 2 * 3600,
+            "Europe/Vilnius" => 2 * 3600,
+            "Europe/Athens" => 2 * 3600,
+            "Europe/Bucharest" => 2 * 3600,
+            "Europe/Kiev" | "Europe/Kyiv" => 2 * 3600,
+            "Europe/Moscow" => 3 * 3600,
+            "Europe/Berlin" | "Europe/Paris" | "Europe/Amsterdam" | "Europe/Rome" | "Europe/Madrid" | "Europe/Warsaw" | "Europe/Prague" | "Europe/Vienna" | "Europe/Stockholm" | "Europe/Oslo" | "Europe/Copenhagen" | "Europe/Brussels" | "Europe/Zurich" => 1 * 3600,
+            "Europe/London" | "Europe/Dublin" | "Europe/Lisbon" | "GMT" | "UTC" => 0,
+            "US/Eastern" | "America/New_York" => -5 * 3600,
+            "US/Central" | "America/Chicago" => -6 * 3600,
+            "US/Mountain" | "America/Denver" => -7 * 3600,
+            "US/Pacific" | "America/Los_Angeles" => -8 * 3600,
+            "America/Anchorage" => -9 * 3600,
+            "Pacific/Honolulu" => -10 * 3600,
+            "Asia/Tokyo" => 9 * 3600,
+            "Asia/Shanghai" | "Asia/Hong_Kong" => 8 * 3600,
+            "Asia/Kolkata" | "Asia/Calcutta" => 5 * 3600 + 1800,
+            "Asia/Dubai" => 4 * 3600,
+            "Australia/Sydney" => 10 * 3600,
+            "Pacific/Auckland" => 12 * 3600,
+            _ => {
+                eprintln!("[ga-tz] unknown timezone: {tz_name}, defaulting to UTC");
+                0
+            }
+        }
+    }
+
     async fn list_ga_properties(access_token: &str) -> Vec<(String, String)> {
         let client = http_client();
         let mut page_token: Option<String> = None;
@@ -779,10 +844,15 @@ pub mod server {
         days: u64,
     ) -> Result<Vec<(String, f64)>, String> {
         let client = http_client();
-        let (start_date, _) = date_range(days);
+        let day_secs = 86400u64;
+        let tz_offset = fetch_ga_timezone(access_token, property_id).await;
+        let local_now = (now_secs() as i64 + tz_offset) as u64;
+        let today_start = (local_now / day_secs) * day_secs;
+        let end_date = format_epoch_date(today_start - day_secs);
+        let start_date = format_epoch_date(today_start - days * day_secs);
 
         let body = serde_json::json!({
-            "dateRanges": [{"startDate": start_date, "endDate": "yesterday"}],
+            "dateRanges": [{"startDate": start_date, "endDate": end_date}],
             "dimensions": [{"name": "date"}],
             "metrics": [{"name": metric}],
             "orderBys": [{"dimension": {"dimensionName": "date"}}],
@@ -809,25 +879,37 @@ pub mod server {
 
         let data: GaRunReportResponse = res.json().await.map_err(|e| e.to_string())?;
 
-        let rows: Vec<(String, f64)> = data
-            .rows
-            .into_iter()
-            .filter_map(|r| {
-                let date_raw = r.dimension_values.first()?.value.clone();
-                let val: f64 = r.metric_values.first()?.value.parse().unwrap_or(0.0);
-                if date_raw.len() == 8 {
-                    let formatted = format!(
-                        "{}-{}-{}",
-                        &date_raw[0..4],
-                        &date_raw[4..6],
-                        &date_raw[6..8]
-                    );
-                    Some((formatted, val))
-                } else {
-                    Some((date_raw, val))
-                }
-            })
-            .collect();
+        let mut by_date: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        for r in data.rows {
+            let Some(date_raw) = r.dimension_values.first().map(|v| v.value.clone()) else { continue };
+            let val: f64 = r.metric_values.first().map(|v| v.value.parse().unwrap_or(0.0)).unwrap_or(0.0);
+            let key = if date_raw.len() == 8 {
+                format!("{}-{}-{}", &date_raw[0..4], &date_raw[4..6], &date_raw[6..8])
+            } else {
+                date_raw
+            };
+            by_date.insert(key, val);
+        }
+
+        // Fill gaps between first and last date GA returned so days with 0 are included
+        let mut sorted_dates: Vec<&String> = by_date.keys().collect();
+        sorted_dates.sort();
+        let rows = if let (Some(first), Some(last)) = (sorted_dates.first(), sorted_dates.last()) {
+            let day_secs: u64 = 86400;
+            let start_ts = parse_date_to_epoch(first);
+            let end_ts = parse_date_to_epoch(last);
+            let mut result: Vec<(String, f64)> = Vec::new();
+            let mut ts = start_ts;
+            while ts <= end_ts {
+                let d = format_epoch_date(ts);
+                let val = by_date.get(&d).copied().unwrap_or(0.0);
+                result.push((d, val));
+                ts += day_secs;
+            }
+            result
+        } else {
+            Vec::new()
+        };
 
         Ok(rows)
     }

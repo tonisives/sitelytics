@@ -7,6 +7,7 @@ import { formatNumber, formatCtr, formatPosition, cleanUrl } from "../lib/format
 import { DayButton } from "../components/DayButton"
 import { StatCard } from "../components/StatCard"
 import { SparklineTooltip, OverlaySparklineTooltip } from "../components/Sparkline"
+import { ThemeToggle } from "../components/ThemeToggle"
 
 export let Dashboard = () => {
   let [days, setDays] = useState(28)
@@ -87,6 +88,18 @@ export let Dashboard = () => {
     return { clicks: maxClicks, impressions: maxImpressions, sessions: maxSessions }
   }, [normalized, data, gaMap])
 
+  let globalDates = useMemo(() => {
+    if (!normalized) return undefined
+    let dates: string[] = []
+    let d = new Date()
+    for (let i = days - 1; i >= 0; i--) {
+      let dt = new Date(d)
+      dt.setDate(d.getDate() - i)
+      dates.push(dt.toISOString().slice(0, 10))
+    }
+    return dates
+  }, [normalized, days])
+
   if (loading && !data) return <div className="loading">Loading...</div>
   if (error) return <div className="container"><div className="error-text">{error}</div></div>
   if (!data) return null
@@ -106,6 +119,7 @@ export let Dashboard = () => {
             <DayButton days={days} setDays={setDays} value={28} />
             <DayButton days={days} setDays={setDays} value={90} />
           </div>
+          <ThemeToggle />
           <button className="logout-btn" onClick={handleLogout}>Sign out</button>
         </div>
       </header>
@@ -135,14 +149,14 @@ export let Dashboard = () => {
           title="Scale all sparklines to the same axis"
         >Scale</button>
       </div>
-      <PropertyTable properties={data.properties} gaMap={gaMap} globalMax={globalMax} />
+      <PropertyTable properties={data.properties} gaMap={gaMap} globalMax={globalMax} globalDates={globalDates} />
     </div>
   )
 }
 
 type GlobalMax = { clicks: number; impressions: number; sessions: number }
 
-let PropertyTable = ({ properties, gaMap, globalMax }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; globalMax?: GlobalMax }) => (
+let PropertyTable = ({ properties, gaMap, globalMax, globalDates }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; globalMax?: GlobalMax; globalDates?: string[] }) => (
   <div className="table-card">
     <table className="prop-table">
       <thead>
@@ -159,28 +173,35 @@ let PropertyTable = ({ properties, gaMap, globalMax }: { properties: DashboardDa
       </thead>
       <tbody>
         {properties.map((p) => (
-          <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} globalMax={globalMax} />
+          <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} globalMax={globalMax} globalDates={globalDates} />
         ))}
       </tbody>
     </table>
   </div>
 )
 
-let PropertyRow = ({ property, gaData, globalMax }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData; globalMax?: GlobalMax }) => {
+let PropertyRow = ({ property, gaData, globalMax, globalDates }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData; globalMax?: GlobalMax; globalDates?: string[] }) => {
   let href = `/property/${encodeURIComponent(property.site_url)}`
 
-  let overlayData = useMemo(
-    () => property.daily.map((r) => [r.date, r.clicks, r.impressions] as [string, number, number]),
-    [property.daily],
-  )
-  let dates = useMemo(() => property.daily.map((r) => r.date), [property.daily])
+  let overlayData = useMemo(() => {
+    let byDate = new Map(property.daily.map((r) => [r.date, r]))
+    let datesToUse = globalDates ?? property.daily.map((r) => r.date)
+    return datesToUse.map((d) => {
+      let r = byDate.get(d)
+      return [d, r?.clicks ?? 0, r?.impressions ?? 0] as [string, number, number]
+    })
+  }, [property.daily, globalDates])
+
+  let dates = useMemo(() => globalDates ?? property.daily.map((r) => r.date), [property.daily, globalDates])
 
   let gaSparkData = useMemo(() => {
     if (!gaData) return []
     let byDate = new Map(gaData.daily_dated)
-    let allDates = new Set([...dates, ...gaData.daily_dated.map(([d]) => d)])
+    let allDates = globalDates
+      ? new Set([...globalDates])
+      : new Set([...dates, ...gaData.daily_dated.map(([d]) => d)])
     return [...allDates].sort().map((d) => [d, byDate.get(d) ?? 0] as [string, number])
-  }, [dates, gaData])
+  }, [dates, gaData, globalDates])
 
   return (
     <tr className="prop-row-link">
