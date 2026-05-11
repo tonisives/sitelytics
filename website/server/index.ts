@@ -7,7 +7,7 @@ let isDev = process.env.NODE_ENV !== "production"
 let port = Number(process.env.PORT || 3000)
 
 let start = async () => {
-  let app = Fastify({ logger: true })
+  let app = Fastify({ logger: isDev ? { level: "warn" } : true })
 
   if (isDev) {
     let { setupDevServer } = await import("./dev.js")
@@ -37,7 +37,7 @@ let start = async () => {
     }
   }
 
-  app.get("/health", (_req, reply) => reply.send({ status: "ok" }))
+  app.get("/health", { config: { disableRequestLogging: true } }, (_req, reply) => reply.send({ status: "ok" }))
 
   app.get("/*", ssrHandler)
 

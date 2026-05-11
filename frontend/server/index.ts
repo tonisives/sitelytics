@@ -7,7 +7,7 @@ let isDev = process.env.NODE_ENV !== "production"
 let port = Number(process.env.PORT || 19000)
 
 let start = async () => {
-  let app = Fastify({ logger: true })
+  let app = Fastify({ logger: isDev ? { level: "warn" } : true })
 
   app.addHook("onSend", (_req, reply, payload, done) => {
     reply.header("X-Content-Type-Options", "nosniff")
@@ -47,7 +47,7 @@ let start = async () => {
     }
   }
 
-  app.get("/health", (_req, reply) => reply.send({ status: "ok" }))
+  app.get("/health", { config: { disableRequestLogging: true } }, (_req, reply) => reply.send({ status: "ok" }))
 
   // Proxy API and auth to Rust backend
   let apiBaseUrl = process.env.API_BASE_URL || "http://localhost:19100"
