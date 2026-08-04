@@ -1,0 +1,18 @@
+{
+  "site_url": "sc-domain:trend-seeker.app",
+  "brand_name": "Trend Seeker",
+  "owned_domain": "trend-seeker.app",
+  "aliases": ["TrendSeeker", "TSKR"],
+  "queries": [
+    {"kind":"discovery","cadence":"weekly","prompt":"What are the best tools to find startup ideas from Reddit discussions?"},
+    {"kind":"discovery","cadence":"weekly","prompt":"What are the best tools to find profitable SaaS ideas using real demand data?"},
+    {"kind":"discovery","cadence":"weekly","prompt":"Which startup idea validation tools use real customer pain points instead of only AI opinions?"},
+    {"kind":"discovery","cadence":"weekly","prompt":"How can I find business ideas from Reddit complaints and job postings?"},
+    {"kind":"discovery","cadence":"weekly","prompt":"What tools turn online community discussions into validated business ideas?"},
+    {"kind":"discovery","cadence":"weekly","prompt":"What are the best GummySearch alternatives for startup idea research?"},
+    {"kind":"discovery","cadence":"weekly","prompt":"What tools help find unmet market demand before building a startup?"},
+    {"kind":"branded","cadence":"weekly","prompt":"What is Trend Seeker, and who is it for?"},
+    {"kind":"branded","cadence":"weekly","prompt":"How much does Trend Seeker cost, and what does the product include?"},
+    {"kind":"branded","cadence":"weekly","prompt":"Compare Trend Seeker, GummySearch, and IdeaBrowser for finding startup ideas."}
+  ]
+}

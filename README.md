@@ -1,12 +1,14 @@
 # Sitelytics
 
-A combined Google Search Console and Google Analytics dashboard. Built with Rust (Axum) backend and React frontend.
+A combined search analytics and AI visibility dashboard. Built with Rust (Axum) backend and React frontend.
 
 Aggregates SEO and traffic metrics across multiple web properties into a single view - impressions, clicks, CTR, average position, and GA4 sessions.
 
 ![Dashboard view](https://cdn.tonis.dev/sitelytics/list-view.png)
 
 ![Property detail view](https://cdn.tonis.dev/sitelytics/details-impressions-and-sessions.png)
+
+![AI visibility](https://cdn.tonis.dev/sitelytics/aeo-visibility.png)
 
 ## Features
 
@@ -16,6 +18,7 @@ Aggregates SEO and traffic metrics across multiple web properties into a single 
 - **Dimension breakdown** - analyze performance by queries, pages, countries, and devices
 - **Date ranges** - switch between 7, 28, and 90 day windows
 - **Client-side caching** - avoids redundant API calls when navigating between views
+- **AI visibility beta** - recurring ChatGPT, Perplexity, and Claude samples with mention role, rank, citations, evidence, and explicit unknown coverage
 
 ## Tech stack
 
@@ -23,6 +26,7 @@ Aggregates SEO and traffic metrics across multiple web properties into a single 
 - **Recharts** - interactive data visualization
 - **Axum 0.8** - Rust async HTTP backend
 - **Google APIs** - Search Console v3, Analytics Admin v1beta, Analytics Data v1beta
+- **PostgreSQL + Redpanda** - durable schedules/results and browser work transport
 
 ## Setup
 
@@ -43,13 +47,17 @@ Aggregates SEO and traffic metrics across multiple web properties into a single 
    - Google Analytics Data API
    - Google Analytics Admin API
 3. Go to **APIs & Services -> Credentials** and create an OAuth 2.0 Client ID (Web application)
-   - Add `http://localhost:19000/auth/callback` as an authorized redirect URI
+   - Add `http://localhost:19000/auth/callback` and the production callback as authorized redirect URIs
 4. Go to **Google Auth Platform -> Data Access** and add these scopes:
+   - `openid`, `email`, and `profile`
    - `https://www.googleapis.com/auth/webmasters.readonly`
    - `https://www.googleapis.com/auth/analytics.readonly`
 5. Go to **Google Auth Platform -> Audience** and add your Google account email as a test user
 
-Since the app uses sensitive scopes (`analytics.readonly`) and is not verified by Google, you will see a "Google hasn't verified this app" warning when signing in. Click **"Advanced"** then **"Go to [app-name] (unsafe)"** to proceed. This is expected for development/personal use.
+For production, configure the consent-screen app name, homepage, privacy policy,
+verified domain, and authorized scopes. Keep the app in testing with explicit
+test users until Google verification is complete; users should not be instructed
+to bypass an unsafe-app warning.
 
 ### Environment variables
 
@@ -57,6 +65,15 @@ Since the app uses sensitive scopes (`analytics.readonly`) and is not verified b
 export GOOGLE_CLIENT_ID="your-client-id"
 export GOOGLE_CLIENT_SECRET="your-client-secret"
 export APP_URL="http://localhost:19000"  # optional, defaults to this
+export DATABASE_URL="postgres://.../sitelytics"
+export APP_ENCRYPTION_KEY="base64-encoded-32-byte-key"
+export ADMIN_EMAILS="admin@example.com"
+export AEO_PUBLIC_ENABLED="false"
+export AGENT_REMOTE_URL="http://localhost:2600/v1/prompt"
+export AGENT_REMOTE_API_KEY="..."
+export KAFKA_BROKERS="localhost:9093"
+# Optional HTTPS endpoint accepting {"text":"..."} for operational alerts
+export TELEGRAM_ALERT_URL="..."
 ```
 
 ### Run
@@ -65,9 +82,15 @@ export APP_URL="http://localhost:19000"  # optional, defaults to this
 # backend
 cargo run
 
+# recurring AEO scheduler, provider sampler, and response consumer
+cargo run -- aeo-worker
+
 # frontend
 cd frontend && pnpm dev
 ```
+
+The stable Trend Seeker baseline from the existing weekly audit is available at
+`etc/seed/trend-seeker-aeo.json` for seeding through the property and query APIs.
 
 ### Build for production
 

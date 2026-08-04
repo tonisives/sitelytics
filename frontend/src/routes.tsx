@@ -2,6 +2,7 @@ import { type RouteObject, Outlet } from "react-router-dom"
 import { Login } from "./pages/Login"
 import { Dashboard } from "./pages/Dashboard"
 import { Detail } from "./pages/Detail"
+import { AdminUsage } from "./pages/AdminUsage"
 
 let RootLayout = () => <Outlet />
 
@@ -12,6 +13,7 @@ export let routes: RouteObject[] = [
       { path: "/", element: <Dashboard /> },
       { path: "/login", element: <Login /> },
       { path: "/property/:site", element: <Detail /> },
+      { path: "/admin/usage", element: <AdminUsage /> },
     ],
   },
 ]

@@ -1,4 +1,4 @@
-import type { DashboardData, PropertyData, DimensionRow, GaSessionsData, GaPropertyData } from "../types"
+import type { DashboardData, PropertyData, DimensionRow, GaSessionsData, GaPropertyData, CurrentUser, AeoProperty, AeoQuery, AeoResult, AeoDashboardRow, AdminUsage, AeoCadence, AeoQueryKind } from "../types"
 
 let fetchJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   let res = await fetch(url, { credentials: "include", ...init })
@@ -30,3 +30,15 @@ export let fetchAllGaSessions = (siteUrls: string[], days: number): Promise<Reco
 
 export let logout = (): Promise<void> =>
   fetch("/api/auth/logout", { method: "POST", credentials: "include" }).then(() => {})
+
+let jsonInit = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+export let fetchMe = (): Promise<CurrentUser> => fetchJson("/api/me")
+export let fetchAeoProperty = (siteUrl: string): Promise<AeoProperty> => fetchJson(`/api/aeo/property?site_url=${encodeURIComponent(siteUrl)}`)
+export let saveAeoProperty = (value: Omit<AeoProperty,"id">): Promise<AeoProperty> => fetchJson("/api/aeo/property", jsonInit("PUT", value))
+export let fetchAeoQueries = (siteUrl: string): Promise<AeoQuery[]> => fetchJson(`/api/aeo/queries?site_url=${encodeURIComponent(siteUrl)}`)
+export let createAeoQuery = (value: {site_url:string;prompt:string;cadence:AeoCadence;kind?:AeoQueryKind}): Promise<AeoQuery> => fetchJson("/api/aeo/queries", jsonInit("POST", value))
+export let updateAeoQuery = (id: string, value: Partial<Pick<AeoQuery,"prompt"|"cadence"|"kind"|"active">>): Promise<AeoQuery> => fetchJson(`/api/aeo/queries/${id}`, jsonInit("PATCH", value))
+export let deleteAeoQuery = (id: string): Promise<void> => fetch(`/api/aeo/queries/${id}`, {method:"DELETE",credentials:"include"}).then((res) => { if (!res.ok) throw new Error(`HTTP ${res.status}`) })
+export let fetchAeoResults = (siteUrl: string): Promise<AeoResult[]> => fetchJson(`/api/aeo/results?site_url=${encodeURIComponent(siteUrl)}`)
+export let fetchAeoDashboard = (siteUrls: string[]): Promise<AeoDashboardRow[]> => fetchJson("/api/aeo/dashboard", jsonInit("POST", {site_urls:siteUrls}))
+export let fetchAdminUsage = (): Promise<AdminUsage> => fetchJson("/api/admin/usage")

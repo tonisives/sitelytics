@@ -1,11 +1,12 @@
 # -- Rust API build --
 FROM rust:1.93-slim AS rust-builder
 
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y pkg-config libssl-dev libsasl2-dev cmake make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY migrations migrations
 RUN mkdir src && echo 'fn main() {}' > src/main.rs
 RUN cargo build --release 2>/dev/null; exit 0
 
@@ -28,7 +29,7 @@ RUN pnpm build
 # -- Runtime --
 FROM node:22-slim
 
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl libsasl2-2 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

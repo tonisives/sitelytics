@@ -52,8 +52,6 @@ pub struct DimensionRow {
 
 pub mod server {
     use super::*;
-    use axum::extract::Query;
-    use axum::response::{IntoResponse, Redirect, Response};
 
     fn http_client() -> &'static reqwest::Client {
         static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
@@ -65,206 +63,10 @@ pub mod server {
         &CLIENT
     }
 
-    fn google_client_id() -> String {
-        std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default()
-    }
-
-    fn google_client_secret() -> String {
-        std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default()
-    }
-
-    fn app_url() -> String {
-        std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:19000".into())
-    }
-
-    pub async fn auth_google() -> Redirect {
-        let client_id = google_client_id();
-        let redirect_uri = format!("{}/auth/callback", app_url());
-        let scope = "https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/analytics.readonly";
-        let url = format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
-            client_id,
-            urlencoding::encode(&redirect_uri),
-            urlencoding::encode(scope),
-        );
-        Redirect::temporary(&url)
-    }
-
-    #[derive(Deserialize)]
-    pub struct CallbackParams {
-        pub code: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct TokenResponse {
-        access_token: String,
-        refresh_token: Option<String>,
-        expires_in: u64,
-    }
-
-    pub async fn auth_callback(Query(params): Query<CallbackParams>) -> Response {
-        let Some(code) = params.code else {
-            return Redirect::temporary("/login").into_response();
-        };
-
-        let client = http_client();
-        let token_res = match client
-            .post("https://oauth2.googleapis.com/token")
-            .form(&[
-                ("code", code.as_str()),
-                ("client_id", &google_client_id()),
-                ("client_secret", &google_client_secret()),
-                ("redirect_uri", &format!("{}/auth/callback", app_url())),
-                ("grant_type", "authorization_code"),
-            ])
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[auth] token request failed: {e}");
-                return Redirect::temporary("/login").into_response();
-            }
-        };
-
-        let body = token_res.text().await.unwrap_or_default();
-        let tokens: TokenResponse = match serde_json::from_str(&body) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("[auth] token parse failed: {e} body={body}");
-                return Redirect::temporary("/login").into_response();
-            }
-        };
-
-        let session_data = serde_json::json!({
-            "access_token": tokens.access_token,
-            "refresh_token": tokens.refresh_token.unwrap_or_default(),
-            "expires_at": now_secs() + tokens.expires_in,
-        });
-
-        let encoded = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            session_data.to_string().as_bytes(),
-        );
-
-        let cookie_str = format!(
-            "gsc_session={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-            encoded
-        );
-
-        (
-            [(http::header::SET_COOKIE, cookie_str)],
-            Redirect::temporary("/"),
-        )
-            .into_response()
-    }
-
     fn now_secs() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs())
-    }
-
-    #[derive(Deserialize)]
-    struct RawSession {
-        access_token: String,
-        refresh_token: String,
-        expires_at: u64,
-    }
-
-    pub struct SessionData {
-        pub access_token: String,
-        pub updated_cookie: Option<String>,
-    }
-
-    fn parse_session_cookie(headers: &http::HeaderMap) -> Option<RawSession> {
-        let cookies = headers.get_all(http::header::COOKIE);
-        for val in cookies {
-            let Ok(s) = val.to_str() else { continue };
-            for part in s.split(';') {
-                let part = part.trim();
-                if let Some(value) = part.strip_prefix("gsc_session=") {
-                    let Ok(decoded) = base64::Engine::decode(
-                        &base64::engine::general_purpose::STANDARD,
-                        value.trim(),
-                    ) else {
-                        continue;
-                    };
-                    let Ok(data) = serde_json::from_slice::<RawSession>(&decoded) else {
-                        continue;
-                    };
-                    return Some(data);
-                }
-            }
-        }
-        None
-    }
-
-    async fn refresh_access_token(refresh_token: &str) -> Option<(String, u64)> {
-        let client = http_client();
-        let res = client
-            .post("https://oauth2.googleapis.com/token")
-            .form(&[
-                ("refresh_token", refresh_token),
-                ("client_id", &google_client_id()),
-                ("client_secret", &google_client_secret()),
-                ("grant_type", "refresh_token"),
-            ])
-            .send()
-            .await
-            .ok()?;
-
-        #[derive(Deserialize)]
-        struct RefreshResponse {
-            access_token: String,
-            expires_in: u64,
-        }
-
-        let tokens: RefreshResponse = res.json().await.ok()?;
-        Some((tokens.access_token, tokens.expires_in))
-    }
-
-    fn build_session_cookie(access_token: &str, refresh_token: &str, expires_at: u64) -> String {
-        let session_data = serde_json::json!({
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "expires_at": expires_at,
-        });
-        let encoded = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            session_data.to_string().as_bytes(),
-        );
-        format!(
-            "gsc_session={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000",
-            encoded
-        )
-    }
-
-    pub async fn extract_session(headers: &http::HeaderMap) -> Option<SessionData> {
-        let raw = parse_session_cookie(headers)?;
-
-        if now_secs() + 60 < raw.expires_at {
-            return Some(SessionData {
-                access_token: raw.access_token,
-                updated_cookie: None,
-            });
-        }
-
-        if raw.refresh_token.is_empty() {
-            eprintln!("[auth] token expired, no refresh token");
-            return None;
-        }
-
-        eprintln!("[auth] token expired, refreshing...");
-        let (new_token, expires_in) = refresh_access_token(&raw.refresh_token).await?;
-        let new_expires_at = now_secs() + expires_in;
-        let cookie = build_session_cookie(&new_token, &raw.refresh_token, new_expires_at);
-        eprintln!("[auth] token refreshed successfully");
-
-        Some(SessionData {
-            access_token: new_token,
-            updated_cookie: Some(cookie),
-        })
     }
 
     #[derive(Deserialize)]
@@ -301,7 +103,9 @@ pub mod server {
 
     fn parse_date_to_epoch(s: &str) -> u64 {
         let parts: Vec<&str> = s.split('-').collect();
-        if parts.len() != 3 { return 0; }
+        if parts.len() != 3 {
+            return 0;
+        }
         let y: i64 = parts[0].parse().unwrap_or(1970);
         let m: u32 = parts[1].parse().unwrap_or(1);
         let d: u32 = parts[2].parse().unwrap_or(1);
@@ -313,8 +117,18 @@ pub mod server {
         }
         let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
         let days_in_months: [u32; 12] = [
-            31, if leap { 29 } else { 28 },
-            31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+            31,
+            if leap { 29 } else { 28 },
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
         ];
         for i in 0..(m as usize - 1).min(11) {
             total_days += days_in_months[i] as i64;
@@ -341,7 +155,16 @@ pub mod server {
         let days_in_months: [i64; 12] = [
             31,
             if leap { 29 } else { 28 },
-            31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
         ];
         let mut m = 0;
         for &dim in &days_in_months {
@@ -709,18 +532,24 @@ pub mod server {
 
     async fn fetch_ga_timezone(access_token: &str, property_id: &str) -> i64 {
         let client = http_client();
-        let url = format!(
-            "https://analyticsadmin.googleapis.com/v1beta/properties/{property_id}"
-        );
+        let url = format!("https://analyticsadmin.googleapis.com/v1beta/properties/{property_id}");
         let res = match client.get(&url).bearer_auth(access_token).send().await {
             Ok(r) => r,
             Err(_) => return 0,
         };
-        if !res.status().is_success() { return 0; }
+        if !res.status().is_success() {
+            return 0;
+        }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct PropInfo { #[serde(default)] time_zone: String }
-        let info: PropInfo = match res.json().await { Ok(v) => v, Err(_) => return 0 };
+        struct PropInfo {
+            #[serde(default)]
+            time_zone: String,
+        }
+        let info: PropInfo = match res.json().await {
+            Ok(v) => v,
+            Err(_) => return 0,
+        };
         tz_offset_secs(&info.time_zone)
     }
 
@@ -736,7 +565,10 @@ pub mod server {
             "Europe/Bucharest" => 2 * 3600,
             "Europe/Kiev" | "Europe/Kyiv" => 2 * 3600,
             "Europe/Moscow" => 3 * 3600,
-            "Europe/Berlin" | "Europe/Paris" | "Europe/Amsterdam" | "Europe/Rome" | "Europe/Madrid" | "Europe/Warsaw" | "Europe/Prague" | "Europe/Vienna" | "Europe/Stockholm" | "Europe/Oslo" | "Europe/Copenhagen" | "Europe/Brussels" | "Europe/Zurich" => 1 * 3600,
+            "Europe/Berlin" | "Europe/Paris" | "Europe/Amsterdam" | "Europe/Rome"
+            | "Europe/Madrid" | "Europe/Warsaw" | "Europe/Prague" | "Europe/Vienna"
+            | "Europe/Stockholm" | "Europe/Oslo" | "Europe/Copenhagen" | "Europe/Brussels"
+            | "Europe/Zurich" => 1 * 3600,
             "Europe/London" | "Europe/Dublin" | "Europe/Lisbon" | "GMT" | "UTC" => 0,
             "US/Eastern" | "America/New_York" => -5 * 3600,
             "US/Central" | "America/Chicago" => -6 * 3600,
@@ -881,10 +713,21 @@ pub mod server {
 
         let mut by_date: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
         for r in data.rows {
-            let Some(date_raw) = r.dimension_values.first().map(|v| v.value.clone()) else { continue };
-            let val: f64 = r.metric_values.first().map(|v| v.value.parse().unwrap_or(0.0)).unwrap_or(0.0);
+            let Some(date_raw) = r.dimension_values.first().map(|v| v.value.clone()) else {
+                continue;
+            };
+            let val: f64 = r
+                .metric_values
+                .first()
+                .map(|v| v.value.parse().unwrap_or(0.0))
+                .unwrap_or(0.0);
             let key = if date_raw.len() == 8 {
-                format!("{}-{}-{}", &date_raw[0..4], &date_raw[4..6], &date_raw[6..8])
+                format!(
+                    "{}-{}-{}",
+                    &date_raw[0..4],
+                    &date_raw[4..6],
+                    &date_raw[6..8]
+                )
             } else {
                 date_raw
             };
@@ -926,10 +769,7 @@ pub mod server {
         list_ga_properties(access_token).await
     }
 
-    pub fn resolve_ga_from_list(
-        ga_props: &[(String, String)],
-        site_url: &str,
-    ) -> Option<String> {
+    pub fn resolve_ga_from_list(ga_props: &[(String, String)], site_url: &str) -> Option<String> {
         let normalized_site = normalize_url_for_match(site_url);
         let result = ga_props
             .iter()

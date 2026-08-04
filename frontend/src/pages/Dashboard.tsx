@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { Helmet } from "react-helmet-async"
 import type { DashboardData, GaPropertyData } from "../types"
-import { fetchGscData, fetchAllGaSessions, logout } from "../lib/api"
+import type { AeoDashboardRow } from "../types"
+import { fetchGscData, fetchAllGaSessions, fetchAeoDashboard, fetchMe, logout } from "../lib/api"
+import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 import { formatNumber, formatCtr, formatPosition, cleanUrl } from "../lib/format"
 import { DayButton } from "../components/DayButton"
 import { StatCard } from "../components/StatCard"
@@ -17,6 +19,8 @@ export let Dashboard = () => {
   let [gaMap, setGaMap] = useState<Record<string, GaPropertyData>>({})
   let [gaLoading, setGaLoading] = useState(false)
   let [normalized, setNormalized] = useState(false)
+  let [aeoMap, setAeoMap] = useState<Record<string,AeoDashboardRow>>({})
+  let [isAdmin,setIsAdmin] = useState(false)
   let navigate = useNavigate()
 
   // Cache dashboard data per days
@@ -75,6 +79,13 @@ export let Dashboard = () => {
     return () => { cancelled = true }
   }, [data, days])
 
+  useEffect(() => {
+    if (!data) return
+    let urls=data.properties.map((property)=>property.site_url)
+    fetchAeoDashboard(urls).then((rows)=>setAeoMap(Object.fromEntries(rows.map((row)=>[row.site_url,row])))).catch(()=>{})
+    fetchMe().then((user)=>setIsAdmin(user.is_admin)).catch(()=>{})
+  },[data])
+
   let handleLogout = useCallback(async () => {
     await logout()
     window.location.href = "/"
@@ -107,6 +118,8 @@ export let Dashboard = () => {
   let totalGaSessions = Object.values(gaMap).reduce((sum, d) => sum + d.total, 0)
   let hasGa = Object.keys(gaMap).length > 0
   let label = `Last ${days} days`
+  let aeoKnown=Object.values(aeoMap).reduce((sum,row)=>sum+row.known,0)
+  let aeoMentioned=Object.values(aeoMap).reduce((sum,row)=>sum+row.mentioned,0)
 
   return (
     <div className="container">
@@ -120,6 +133,7 @@ export let Dashboard = () => {
             <DayButton days={days} setDays={setDays} value={90} />
           </div>
           <ThemeToggle />
+          {isAdmin&&<a className="logout-btn admin-link" href="/admin/usage">Usage</a>}
           <button className="logout-btn" onClick={handleLogout}>Sign out</button>
         </div>
       </header>
@@ -139,6 +153,11 @@ export let Dashboard = () => {
           </div>
           <div className="stat-sub color-teal">Google Analytics</div>
         </div>
+        <div className="stat-card">
+          <div className="stat-label">AI visibility</div>
+          <div className="stat-value">{aeoKnown?`${Math.round(aeoMentioned/aeoKnown*100)}%`:"-"}</div>
+          <div className="stat-sub color-accent">Discovery queries mentioned</div>
+        </div>
       </div>
 
       <div className="table-header-row">
@@ -149,14 +168,14 @@ export let Dashboard = () => {
           title="Scale all sparklines to the same axis"
         >Scale</button>
       </div>
-      <PropertyTable properties={data.properties} gaMap={gaMap} globalMax={globalMax} globalDates={globalDates} />
+      <PropertyTable properties={data.properties} gaMap={gaMap} aeoMap={aeoMap} globalMax={globalMax} globalDates={globalDates} />
     </div>
   )
 }
 
 type GlobalMax = { clicks: number; impressions: number; sessions: number }
 
-let PropertyTable = ({ properties, gaMap, globalMax, globalDates }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; globalMax?: GlobalMax; globalDates?: string[] }) => (
+let PropertyTable = ({ properties, gaMap, aeoMap, globalMax, globalDates }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; aeoMap:Record<string,AeoDashboardRow>; globalMax?: GlobalMax; globalDates?: string[] }) => (
   <div className="table-card">
     <table className="prop-table">
       <thead>
@@ -167,20 +186,21 @@ let PropertyTable = ({ properties, gaMap, globalMax, globalDates }: { properties
           <th className="num-cell">CTR</th>
           <th className="num-cell">Position</th>
           <th className="num-cell ga-col">Sessions</th>
+          <th className="num-cell">AI mentions</th>
           <th className="sparkline-header">Clicks / Impressions</th>
           <th className="sparkline-header ga-col">Sessions</th>
         </tr>
       </thead>
       <tbody>
         {properties.map((p) => (
-          <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} globalMax={globalMax} globalDates={globalDates} />
+          <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} aeoData={aeoMap[p.site_url]} globalMax={globalMax} globalDates={globalDates} />
         ))}
       </tbody>
     </table>
   </div>
 )
 
-let PropertyRow = ({ property, gaData, globalMax, globalDates }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData; globalMax?: GlobalMax; globalDates?: string[] }) => {
+let PropertyRow = ({ property, gaData, aeoData, globalMax, globalDates }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData; aeoData?:AeoDashboardRow; globalMax?: GlobalMax; globalDates?: string[] }) => {
   let href = `/property/${encodeURIComponent(property.site_url)}`
 
   let overlayData = useMemo(() => {
@@ -215,6 +235,7 @@ let PropertyRow = ({ property, gaData, globalMax, globalDates }: { property: Das
           {gaData ? formatNumber(gaData.total) : "-"}
         </a>
       </td>
+      <td className="aeo-pie-cell"><AeoPie data={aeoData} href={href} /></td>
       <td className="sparkline-cell">
         <OverlaySparklineTooltip
           href={href}
@@ -242,4 +263,11 @@ let PropertyRow = ({ property, gaData, globalMax, globalDates }: { property: Das
       </td>
     </tr>
   )
+}
+
+let AeoPie = ({data,href}:{data?:AeoDashboardRow;href:string}) => {
+  if (!data || (!data.known&&!data.unknown)) return <a href={href} className="row-link">-</a>
+  let absent=Math.max(0,data.known-data.mentioned)
+  let chart=[{name:"Mentioned",value:data.mentioned,color:"var(--accent)"},{name:"Not mentioned",value:absent,color:"var(--border)"},{name:"Unknown",value:data.unknown,color:"var(--chart-orange)"}].filter((item)=>item.value>0)
+  return <a href={href} className="aeo-pie-link" title={`${data.mentioned}/${data.known} known pairs mentioned; ${data.unknown} unknown`}><ResponsiveContainer width={42} height={42}><PieChart><Pie data={chart} dataKey="value" innerRadius={11} outerRadius={19} stroke="none">{chart.map((item)=><Cell key={item.name} fill={item.color}/>)}</Pie></PieChart></ResponsiveContainer><span>{data.mentioned}/{data.known}</span></a>
 }

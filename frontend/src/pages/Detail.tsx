@@ -10,6 +10,7 @@ import { fetchPropertyDetail, fetchGaSessions, fetchDimension } from "../lib/api
 import { formatNumber, formatTipNumber, formatCtr, formatPosition, formatAxisNumber, cleanUrl } from "../lib/format"
 import { DayButton } from "../components/DayButton"
 import { ThemeToggle } from "../components/ThemeToggle"
+import { AeoSection } from "../components/AeoSection"
 
 let GA_METRICS: [string, string, string][] = [
   ["sessions", "Sessions", "var(--chart-teal)"],
@@ -236,6 +237,8 @@ let DetailContent = ({
         gaColor={gaColor}
         gaLoading={gaLoading}
       />
+
+      <AeoSection siteUrl={siteUrl} />
 
       <DimensionTabs siteUrl={siteUrl} days={days} />
     </>
