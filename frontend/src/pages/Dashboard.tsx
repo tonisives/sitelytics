@@ -176,7 +176,7 @@ export let Dashboard = () => {
 type GlobalMax = { clicks: number; impressions: number; sessions: number }
 
 let PropertyTable = ({ properties, gaMap, aeoMap, globalMax, globalDates }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; aeoMap:Record<string,AeoDashboardRow>; globalMax?: GlobalMax; globalDates?: string[] }) => (
-  <div className="table-card">
+  <div className="table-card property-table-card" role="region" aria-label="Domain list" tabIndex={0}>
     <table className="prop-table">
       <thead>
         <tr>

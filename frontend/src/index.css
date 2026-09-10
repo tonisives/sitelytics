@@ -293,6 +293,18 @@ h2 {
   box-shadow: var(--shadow-card);
 }
 
+.property-table-card {
+  overflow-x: auto;
+}
+
+.property-table-card .prop-table {
+  min-width: 1000px;
+}
+
+.property-table-card .prop-name {
+  white-space: nowrap;
+}
+
 .prop-table {
   width: 100%;
   border-collapse: collapse;
