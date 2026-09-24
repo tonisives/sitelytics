@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sitelytics-seo-browser-worker
+  namespace: utils
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sitelytics-seo-browser-worker
+  template:
+    metadata:
+      labels:
+        app: sitelytics-seo-browser-worker
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          image: registry.tonisives.com/tgs/sitelytics-seo-browser:seo-20260925-1@sha256:3d0fcf191e980cb9d5f955145f4774bc76923bd4fbb3f7fe36473eec2d025a0a
+          envFrom:
+            - secretRef:
+                name: sitelytics-secrets
+          env:
+            - name: KAFKA_BROKERS
+              value: redpanda.redpanda.svc.cluster.local:9093
+            - name: SITELYTICS_URL
+              value: http://sitelytics.utils.svc.cluster.local:19000
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      imagePullSecrets:
+        - name: tonisives-registry-secret
