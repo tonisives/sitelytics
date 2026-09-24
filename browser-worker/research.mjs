@@ -37,7 +37,7 @@ export let competitorCandidates = (snapshots, context, ownHost, known = []) => {
   current.matched_terms = [...new Set([...current.matched_terms, ...matches])]
   domains.set(domain, current)
  }
- return [...domains.values()].sort((a, b) => b.appearances - a.appearances || b.matched_terms.length - a.matched_terms.length || a.best_position - b.best_position).slice(0, 12)
+ return [...domains.values()].sort((a, b) => b.appearances - a.appearances || b.matched_terms.length - a.matched_terms.length || a.best_position - b.best_position).slice(0, 20)
 }
 export let validateCompetitor = (candidate, page, context, known = []) => {
  let host
@@ -46,7 +46,10 @@ export let validateCompetitor = (candidate, page, context, known = []) => {
  if (!known.includes(candidate.domain) && (host.startsWith("blog.") || articlePath.test(new URL(page.url).pathname))) return null
  let metadata = `${page.title || ""} ${page.description || ""} ${(page.h1 || []).join(" ")}`
  let matches = matchedTerms(context, metadata)
- let offersProduct = /\b(software|platform|tool|app|suite|product|workspace|service)\b/i.test(metadata) || /\b(sign up|get started|start free|try free)\b/i.test((page.excerpt || "").slice(0, 1000))
+ let offersProduct = /\b(software|platform|tools?|apps?|suite|product|workspace|services?)\b/i.test(metadata) || /\b(sign up|get started|start free|try free)\b/i.test((page.excerpt || "").slice(0, 1000))
+ let discoveryContext = /\b(discovery|discover|finding|find|generation|generate|spotting|spot)\b/i.test(context.split(/[,;.!?\n]/)[0]) && /\b(idea|opportunity|signal)\b/i.test(context)
+ let discoversIdeas = /\b(discover|discovery|find|finding|generate|generator|browse|explore|curat\w*|spot|uncover)\b/i.test(metadata) && /\b(ideas?|opportunit\w*|signals?)\b/i.test(metadata)
+ if (discoveryContext && !discoversIdeas && !known.includes(candidate.domain)) return null
  if ((!hasContext(context, matches) || !offersProduct) && !known.includes(candidate.domain)) return null
  return { ...candidate, matched_terms: [...new Set([...candidate.matched_terms, ...matches])], page_url: page.url, page_title: page.title, description: page.description, confirmed_by: known.includes(candidate.domain) ? "Saved competitor" : "Context match on website" }
 }

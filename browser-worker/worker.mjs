@@ -127,7 +127,7 @@ let processJob = async (job, heartbeat) => {
   let confirmed = []
   if (job.kind === "research") {
    for (let domain of knownCompetitors) if (!discovered.some(item => item.domain === domain)) discovered.push({ domain, appearances: 0, best_position: null, matched_terms: [], result_url: `https://${domain}/`, result_title: domain })
-   for (let candidate of discovered.slice(0, 10)) {
+   for (let candidate of discovered.slice(0, 20)) {
     try {
      let inspectionUrl = candidateInspectionUrl(candidate)
      if (!inspectionUrl) continue
