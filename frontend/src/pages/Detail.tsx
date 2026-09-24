@@ -23,7 +23,7 @@ let GA_METRICS: [string, string, string][] = [
 type MetricKey = "clicks" | "impressions" | "ctr" | "position"
 
 export let Detail = () => {
-  let { site } = useParams<{ site: string }>()
+  let { site, report } = useParams<{ site: string; report?: string }>()
   let siteUrl = site ? decodeURIComponent(site) : ""
   let navigate = useNavigate()
 
@@ -124,7 +124,7 @@ export let Detail = () => {
         </div>
       </header>
 
-      <SeoWorkspace key={siteUrl} siteUrl={siteUrl}><DetailContent
+      <SeoWorkspace key={siteUrl} siteUrl={siteUrl} report={report}><DetailContent
         prop={prop}
         siteUrl={siteUrl}
         days={days}

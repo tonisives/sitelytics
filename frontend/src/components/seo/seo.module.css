@@ -1,6 +1,9 @@
 .workspace { margin-top: 20px; }
 .tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
 .workspace button { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 9px 14px; border-radius: 5px; cursor: pointer; font: inherit; white-space: nowrap; }
+.tabs a { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 9px 14px; border-radius: 5px; text-decoration: none; white-space: nowrap; }
+.tabs a:hover { background: var(--surface-hover); }
+.tabs a[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .workspace button:hover { background: var(--surface-hover); }
 .workspace button[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .workspace button:disabled { opacity: .55; cursor: default; }
@@ -24,6 +27,16 @@
 .table th, .table td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; min-width: 90px; max-width: 420px; overflow-wrap: anywhere; }
 .table th { color: var(--text-muted); white-space: nowrap; font-weight: 500; }
 .table a { color: var(--accent); }
+.chart { max-width: 900px; min-width: 0; border: 1px solid var(--border); background: var(--surface); padding: 12px; }
+.competitorList { display: grid; gap: 12px; max-width: 900px; }
+.competitorList article { border: 1px solid var(--border); background: var(--surface); padding: 12px 16px; min-width: 0; }
+.competitorList h4, .competitorList p { margin: 0 0 6px; }
+.competitorList small { color: var(--text-muted); }
+.compactTable td { padding-top: 8px; padding-bottom: 8px; vertical-align: middle; }
+.compactTable td:first-child { width: 55%; max-width: 360px; }
+.compactTable td:first-child a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compactTable td p { max-width: 520px; overflow-wrap: anywhere; }
+.compactTable summary { padding: 0; white-space: nowrap; }
 .empty { padding: 24px 0; }
 .workspace summary { cursor: pointer; padding: 12px 0; }
 .summary { display: block; font-size: 11px; color: var(--text-muted); margin-top: 6px; }

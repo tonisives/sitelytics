@@ -236,7 +236,7 @@ let PropertyRow = ({ property, gaData, aeoData, globalMax, globalDates }: { prop
           {gaData ? formatNumber(gaData.total) : "-"}
         </a>
       </td>
-      <td className="aeo-pie-cell"><AeoPie data={aeoData} href={href} /></td>
+      <td className="aeo-pie-cell"><AeoPie data={aeoData} href={`${href}/seo/ai-visibility`} /></td>
       <td className="sparkline-cell">
         <OverlaySparklineTooltip
           href={href}

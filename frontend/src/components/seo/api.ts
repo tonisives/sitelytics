@@ -1,7 +1,7 @@
 export type Module = "keywords" | "rankings" | "research" | "audit"
 export type Settings = {
  root_url: string; modules: Record<Module, { enabled: boolean; weekly: boolean }>
- keywords: string[]; competitors: string[]; link_candidates: string[]; render_urls: string[]
+ keywords: string[]; competitors: string[]; product_context: string; link_candidates: string[]; render_urls: string[]
  country: string; language: string; page_limit: number
 }
 export type DataRow = Record<string, unknown>

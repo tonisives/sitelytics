@@ -20,6 +20,8 @@ pub struct Config {
     pub modules: BTreeMap<String, ModuleSettings>,
     pub keywords: Vec<String>,
     pub competitors: Vec<String>,
+    #[serde(default)]
+    pub product_context: String,
     pub link_candidates: Vec<String>,
     pub render_urls: Vec<String>,
     pub country: String,
@@ -40,6 +42,7 @@ impl Config {
                 .collect(),
             keywords: vec![],
             competitors: vec![],
+            product_context: String::new(),
             link_candidates: vec![],
             render_urls: vec![],
             country: "us".into(),
@@ -99,6 +102,10 @@ impl Config {
         if self.keywords.iter().any(|s| s.len() > 200) {
             return Err("Keywords must be at most 200 bytes".into());
         }
+        self.product_context = self.product_context.trim().to_string();
+        if self.product_context.len() > 500 {
+            return Err("Product context must be at most 500 bytes".into());
+        }
         for domain in &self.competitors {
             let url = reqwest::Url::parse(&format!("https://{domain}/"))
                 .map_err(|_| "Invalid competitor domain")?;
@@ -140,6 +147,9 @@ mod tests {
         let mut c = Config::initial("sc-domain:example.com");
         assert!(!c.enabled("audit"));
         assert!(c.validate("sc-domain:example.com").is_ok());
+        let mut legacy = serde_json::to_value(&c).unwrap();
+        legacy.as_object_mut().unwrap().remove("product_context");
+        assert!(serde_json::from_value::<Config>(legacy).is_ok());
         c.root_url = "https://evil-example.com/".into();
         assert!(c.validate("sc-domain:example.com").is_err());
         c.root_url = "https://example.com/other/".into();

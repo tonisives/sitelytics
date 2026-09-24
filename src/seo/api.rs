@@ -185,6 +185,9 @@ pub async fn run(
     if input.module == "rankings" && typed.keywords.is_empty() {
         return Err(bad("Save at least one keyword"));
     }
+    if input.module == "research" && typed.product_context.is_empty() {
+        return Err(bad("Describe the product context in SEO settings first"));
+    }
     let site: Uuid = row.get("id");
     let id:Uuid=sqlx::query_scalar("INSERT INTO seo_jobs(site_id,module,config) VALUES($1,$2,$3) ON CONFLICT(site_id,module) WHERE status IN ('queued','running','waiting_browser') DO UPDATE SET site_id=EXCLUDED.site_id RETURNING id").bind(site).bind(input.module).bind(config).fetch_one(&mut *tx).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;

@@ -5,6 +5,7 @@ import { lookup } from "node:dns/promises"
 import { readFile, writeFile, unlink } from "node:fs/promises"
 import { isIP, connect } from "node:net"
 import { extractSerp, extractPage, rankResult } from "./extract.mjs"
+import { competitorCandidates, researchQueries, validateCompetitor } from "./research.mjs"
 let exec = promisify(execFile)
 let brokers = process.env.KAFKA_BROKERS?.split(",")
 let base = process.env.SITELYTICS_URL
@@ -77,11 +78,11 @@ let processJob = async (job, heartbeat) => {
   if (!pane) throw new Error("bmux did not return a pane ID")
   await writeFile(ownershipFile, JSON.stringify({ pane, job: job.id }), { mode: 0o600 })
   await command(["cdp", "-t", pane, "Emulation.setDeviceMetricsOverride", JSON.stringify({ width: 1365, height: 900, deviceScaleFactor: 1, mobile: false })])
-  let queries = job.kind === "audit" ? [] : job.config.keywords.slice(0, job.kind === "rankings" ? 100 : 10)
-  if (job.kind === "research") {
-   for (let domain of job.config.competitors.slice(0, 10)) queries.push(`"${domain}" -site:${domain}`)
-   for (let keyword of job.config.keywords.slice(0, 5)) queries.push(`${keyword} resources directory`)
-  }
+  let context = (job.config.product_context || "").trim()
+  let knownCompetitors = (job.config.competitors || []).map(domain => domain.replace(/^www\./, ""))
+  if (job.kind === "research") { result.research_version = 2; result.product_context = context }
+  let queries = job.kind === "rankings" ? job.config.keywords.slice(0, 100) : job.kind === "research" ? researchQueries(context) : []
+  if (job.kind === "research" && !context) throw new Error("Set the product context in SEO settings before competitor research")
   for (let keyword of [...new Set(queries)]) {
    try {
     let url = new URL("https://www.google.com/search");url.search = new URLSearchParams({ q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
@@ -107,7 +108,30 @@ let processJob = async (job, heartbeat) => {
     if (rank.status === "unknown") result.errors.push({ keyword, error: "SERP layout could not be parsed" })
    } catch (error) { result.errors.push({ keyword, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
   }
-  let candidates = job.kind === "audit" ? job.config.render_urls.slice(0, 5) : job.kind === "research" ? [...new Set([...job.config.link_candidates, ...result.snapshots.flatMap(s => s.entries.map(e => e.url))])].slice(0, 25) : []
+  let discovered = job.kind === "research" ? competitorCandidates(result.snapshots, context, root.hostname, knownCompetitors) : []
+  let confirmed = []
+  if (job.kind === "research") {
+   for (let domain of knownCompetitors) if (!discovered.some(item => item.domain === domain)) discovered.push({ domain, appearances: 0, best_position: null, matched_terms: [], result_url: `https://${domain}/`, result_title: domain })
+   for (let candidate of discovered.slice(0, 10)) {
+    try {
+     await navigate(candidate.result_url)
+     let page = await evaluate(pane, extractPage)
+     let verified = validateCompetitor(candidate, page, context, knownCompetitors)
+     if (verified) confirmed.push(verified)
+    } catch (error) { result.errors.push({ url: candidate.result_url, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
+   }
+   for (let competitor of confirmed.slice(0, 3)) queries.push(`"${competitor.domain}" -site:${competitor.domain} resources`)
+   for (let keyword of [...new Set(queries)].slice(3)) {
+    try {
+     let url = new URL("https://www.google.com/search"); url.search = new URLSearchParams({ q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
+     await navigate(url.href)
+     let snapshot = await evaluate(pane, extractSerp)
+     result.snapshots.push({ keyword, ...snapshot })
+     if (snapshot.blocked) { result.errors.push({ keyword, error: "Google blocked this request; link research paused" }); break }
+    } catch (error) { result.errors.push({ keyword, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
+   }
+  }
+  let candidates = job.kind === "audit" ? job.config.render_urls.slice(0, 5) : job.kind === "research" ? [...new Set([...job.config.link_candidates, ...result.snapshots.slice(3).flatMap(s => s.entries.map(e => e.url))])].filter(url => { try { let host = new URL(url).hostname; return host !== root.hostname && !confirmed.some(item => host === item.domain || host.endsWith(`.${item.domain}`)) } catch { return false } }).slice(0, 25) : []
   for (let address of candidates) {
    try {
     await navigate(address)
@@ -117,11 +141,12 @@ let processJob = async (job, heartbeat) => {
     result.pages.push(page)
     if (job.kind === "research") {
      let matches = domain => page.links.filter(link => { try { let host = new URL(link).hostname; return host === domain || host.endsWith(`.${domain}`) } catch { return false } })
-     result.prospects.push({ url: page.url, title: page.title, owned_links: matches(root.hostname), competitor_links: job.config.competitors.flatMap(domain => matches(domain)), status: "inspected", evidence: page.excerpt })
+     let owned = matches(root.hostname), linkedCompetitors = confirmed.flatMap(item => matches(item.domain))
+     if (owned.length || linkedCompetitors.length) result.prospects.push({ url: page.url, title: page.title, owned_links: owned, competitor_links: linkedCompetitors, status: "observed", evidence: page.excerpt.slice(0, 500) })
     }
    } catch (error) { result.errors.push({ url: address, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
   }
-  result.competitors = [...new Set(result.snapshots.flatMap(s => s.entries.map(e => e.domain)))].filter(domain => domain !== root.hostname && !domain.endsWith(`.${root.hostname}`))
+  if (job.kind === "research") result.competitors = confirmed
   // Audit HTTP pages and issues remain the baseline; rendered observations are additional evidence.
   let incomplete = result.errors.length > 0
   if (job.kind === "audit") { result.render_errors = result.errors; delete result.errors; result.rendered_pages = result.pages;delete result.pages;delete result.source;delete result.collected_at }

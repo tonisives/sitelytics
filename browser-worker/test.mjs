@@ -1,6 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { rankResult } from "./extract.mjs"
+import { competitorCandidates, validateCompetitor } from "./research.mjs"
 test("unknown is distinct from not observed", () => {
  assert.equal(rankResult({ entries: [] }, "example.com").status, "unknown")
  assert.equal(rankResult({ entries: [], blocked: true }, "example.com").status, "blocked")
@@ -9,4 +10,16 @@ test("unknown is distinct from not observed", () => {
 test("domain boundary and subdomain ranking", () => {
  let result = rankResult({ entries: [{ domain: "notexample.com", position: 1 }, { domain: "www.example.com", position: 2, url: "https://www.example.com/a" }] }, "example.com")
  assert.equal(result.position, 2)
+})
+test("context research excludes branded stock analysis and confirms product matches", () => {
+ let context = "Business idea discovery, early market signals for founders"
+ let snapshots = [{ entries: [
+  { domain: "stocks.example", position: 1, url: "https://stocks.example/", title: "Trend Seeker stock price technical analysis", snippet: "Trading charts and early market signals" },
+  { domain: "ideas.example", position: 2, url: "https://ideas.example/", title: "Find business ideas", snippet: "Discover emerging market signals for founders" },
+  { domain: "youtube.com", position: 3, url: "https://youtube.com/watch", title: "Business idea discovery", snippet: "Market signals" }
+ ] }]
+ let candidates = competitorCandidates(snapshots, context, "trend-seeker.app")
+ assert.deepEqual(candidates.map(item => item.domain), ["ideas.example"])
+ assert.equal(validateCompetitor(candidates[0], { url: "https://ideas.example/", title: "Business idea discovery", description: "Emerging market signals for founders", h1: [], excerpt: "" }, context)?.domain, "ideas.example")
+ assert.equal(validateCompetitor(candidates[0], { url: "https://ideas.example/", title: "Stock charts", description: "Technical analysis", h1: [], excerpt: "" }, context), null)
 })

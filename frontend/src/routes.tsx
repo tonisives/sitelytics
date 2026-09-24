@@ -13,6 +13,7 @@ export let routes: RouteObject[] = [
       { path: "/", element: <Dashboard /> },
       { path: "/login", element: <Login /> },
       { path: "/property/:site", element: <Detail /> },
+      { path: "/property/:site/seo/:report", element: <Detail /> },
       { path: "/admin/usage", element: <AdminUsage /> },
     ],
   },
