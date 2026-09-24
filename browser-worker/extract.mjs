@@ -43,6 +43,26 @@ export let extractBingSerp = (html, pageUrl) => {
  return { entries, suggestions: [], blocked: /unusual traffic|verify you are a human|captcha/i.test($("body").text()), actual_url: pageUrl, explicit_empty: /no results found|there are no results/i.test($("body").text()) }
 }
 
+export let extractDuckDuckGoLite = (html, pageUrl) => {
+ let $ = load(html), entries = [], seen = new Set()
+ $("a.result-link").each((_, anchor) => {
+  if (entries.length >= 20) return
+  let href = absolute($(anchor).attr("href"), pageUrl)
+  if (!href) return
+  let url
+  try {
+   url = new URL(href)
+   if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") url = new URL(url.searchParams.get("uddg"))
+  } catch { return }
+  if (!["http:", "https:"].includes(url.protocol) || seen.has(url.href)) return
+  seen.add(url.href)
+  let row = $(anchor).closest("tr")
+  entries.push({ position: entries.length + 1, url: url.href, domain: url.hostname, title: $(anchor).text().trim(), snippet: row.next().text().trim().slice(0, 1500) })
+ })
+ let body = $("body").text()
+ return { entries, suggestions: [], blocked: /automated requests|verify you are human|captcha|unusual traffic/i.test(body), actual_url: pageUrl, explicit_empty: /no results found|no results\./i.test(body) }
+}
+
 export let extractPage = (html, pageUrl) => {
  let $ = load(html), body = $("body").text()
  return {

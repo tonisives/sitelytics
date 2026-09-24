@@ -2,8 +2,8 @@ import { Kafka, logLevel } from "kafkajs"
 import { randomUUID } from "node:crypto"
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { extractBingSerp, extractSerp, extractPage, rankResult } from "./extract.mjs"
-import { candidateInspectionUrl, competitorCandidates, researchQueries, validateCompetitor } from "./research.mjs"
+import { extractDuckDuckGoLite, extractSerp, extractPage, rankResult } from "./extract.mjs"
+import { candidateInspectionUrl, competitorCandidates, researchQueries, topicalProspect, validateCompetitor } from "./research.mjs"
 let brokers = process.env.KAFKA_BROKERS?.split(",")
 let base = process.env.SITELYTICS_URL
 let token = process.env.SEO_BROWSER_TOKEN
@@ -17,6 +17,24 @@ let scrapeRequests = "tskr.scrape.headless.requests"
 let scrapeResponses = "tskr.scrape.responses"
 let pending = new Map()
 let sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+let lastResearchSearch = 0
+let searchResearch = async (job, query, heartbeat) => {
+ if (!(await authorized(job.id))) throw new Error("Job cancelled")
+ await heartbeat()
+ await sleep(Math.max(0, 3000 - (Date.now() - lastResearchSearch)))
+ lastResearchSearch = Date.now()
+ let url = new URL("https://lite.duckduckgo.com/lite/")
+ url.searchParams.set("q", query)
+ let response = await fetch(url, { redirect: "manual", headers: { "User-Agent": "Mozilla/5.0 (compatible; SitelyticsSEO/1.0)" }, signal: AbortSignal.timeout(30000) })
+ if (!response.ok) throw new Error(`Search returned HTTP ${response.status}`)
+ await publicUrl(response.url)
+ if (new URL(response.url).hostname !== "lite.duckduckgo.com") throw new Error("Search redirected away from DuckDuckGo")
+ let html = await response.text()
+ if (html.length > 1048576) throw new Error("Search response too large")
+ let snapshot = extractDuckDuckGoLite(html, response.url)
+ if (!snapshot.entries.length && !snapshot.explicit_empty) snapshot.blocked = true
+ return snapshot
+}
 let scrape = async (job, url) => {
  let requestId = `sitelytics-seo:${job.id}:${randomUUID()}`
  let response = new Promise((resolve, reject) => {
@@ -61,7 +79,7 @@ let processJob = async (job, heartbeat) => {
  if (job.version !== 1 || !["rankings", "research", "audit"].includes(job.kind) || !/^[a-f0-9-]{36}$/.test(job.id)) throw new Error("Unsupported browser job")
  if (Date.parse(job.expires_at) < Date.now() || !(await authorized(job.id))) return
  let root = await publicUrl(job.config.root_url)
- let result = { source: "shared Chrome queue observation", collected_at: new Date().toISOString(), browser_context: { device: "desktop", requested_country: job.config.country, requested_language: job.config.language, location_precision: "Browser IP region; requested country is a hint, not verified geolocation" }, snapshots: [], pages: [], prospects: [], suggestions: [], errors: [] }
+ let result = { source: job.kind === "research" ? "remote search and shared Chrome observations" : "shared Chrome queue observation", collected_at: new Date().toISOString(), browser_context: { device: "desktop", requested_country: job.config.country, requested_language: job.config.language, location_precision: "Browser IP region; requested country is a hint, not verified geolocation" }, snapshots: [], pages: [], prospects: [], suggestions: [], errors: [] }
  let navigate = async address => {
   if (!(await authorized(job.id))) throw new Error("Job cancelled")
   await heartbeat()
@@ -72,15 +90,19 @@ let processJob = async (job, heartbeat) => {
  {
   let context = (job.config.product_context || "").trim()
   let knownCompetitors = (job.config.competitors || []).map(domain => domain.replace(/^www\./, ""))
-  if (job.kind === "research") { result.research_version = 2; result.product_context = context; result.browser_context.search_engine = "Bing" }
+  if (job.kind === "research") { result.research_version = 2; result.product_context = context; result.browser_context.search_engine = "DuckDuckGo Lite" }
   let queries = job.kind === "rankings" ? job.config.keywords.slice(0, 100) : job.kind === "research" ? researchQueries(context) : []
   if (job.kind === "research" && !context) throw new Error("Set the product context in SEO settings before competitor research")
   for (let keyword of [...new Set(queries)]) {
    try {
-    let url = new URL(job.kind === "research" ? "https://www.bing.com/search" : "https://www.google.com/search")
-    url.search = new URLSearchParams(job.kind === "research" ? { q: keyword } : { q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
-    let page = await navigate(url.href)
-    let snapshot = job.kind === "research" ? extractBingSerp(page.html, page.url) : extractSerp(page.html, page.url)
+    let snapshot
+    if (job.kind === "research") snapshot = await searchResearch(job, keyword, heartbeat)
+    else {
+     let url = new URL("https://www.google.com/search")
+     url.search = new URLSearchParams({ q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
+     let page = await navigate(url.href)
+     snapshot = extractSerp(page.html, page.url)
+    }
     for (let entry of snapshot.entries) {
      let redirect = new URL(entry.url)
      if (redirect.hostname !== "www.google.com" || !["/goto", "/url"].includes(redirect.pathname)) continue
@@ -118,9 +140,7 @@ let processJob = async (job, heartbeat) => {
    for (let competitor of confirmed.slice(0, 3)) queries.push(`"${competitor.domain}" -site:${competitor.domain} resources`)
    for (let keyword of [...new Set(queries)].slice(3)) {
     try {
-     let url = new URL("https://www.bing.com/search"); url.search = new URLSearchParams({ q: keyword }).toString()
-     let page = await navigate(url.href)
-     let snapshot = extractBingSerp(page.html, page.url)
+     let snapshot = await searchResearch(job, keyword, heartbeat)
      result.snapshots.push({ keyword, ...snapshot })
      if (snapshot.blocked) { result.errors.push({ keyword, error: "Search engine blocked this request; link research paused" }); break }
     } catch (error) { result.errors.push({ keyword, error: error.message }); if (/cancelled|authorization|rate.limit|captcha|challenge|consent|blocked/i.test(error.message)) break }
@@ -137,7 +157,7 @@ let processJob = async (job, heartbeat) => {
     if (job.kind === "research") {
      let matches = domain => page.links.filter(link => { try { let host = new URL(link).hostname; return host === domain || host.endsWith(`.${domain}`) } catch { return false } })
      let owned = matches(root.hostname), linkedCompetitors = confirmed.flatMap(item => matches(item.domain))
-     if (owned.length || linkedCompetitors.length) result.prospects.push({ url: page.url, title: page.title, owned_links: owned, competitor_links: linkedCompetitors, status: "observed", evidence: page.excerpt.slice(0, 500) })
+     if (owned.length || linkedCompetitors.length || topicalProspect(page, context)) result.prospects.push({ url: page.url, title: page.title, owned_links: owned, competitor_links: linkedCompetitors, status: owned.length || linkedCompetitors.length ? "observed link" : "topical outreach idea", evidence: page.excerpt.slice(0, 500) })
     }
    } catch (error) { result.errors.push({ url: address, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
   }
