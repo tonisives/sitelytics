@@ -1,0 +1,1 @@
+{"name":"sitelytics-seo-browser","private":true,"type":"module","scripts":{"start":"node worker.mjs","test":"node --test test.mjs"},"dependencies":{"kafkajs":"2.2.4"}}

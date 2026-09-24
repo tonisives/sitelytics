@@ -1,3 +1,4 @@
+import { SeoSummary, SeoSummaryProvider } from "../components/seo/SeoSummary"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { Helmet } from "react-helmet-async"
@@ -168,7 +169,7 @@ export let Dashboard = () => {
           title="Scale all sparklines to the same axis"
         >Scale</button>
       </div>
-      <PropertyTable properties={data.properties} gaMap={gaMap} aeoMap={aeoMap} globalMax={globalMax} globalDates={globalDates} />
+      <SeoSummaryProvider><PropertyTable properties={data.properties} gaMap={gaMap} aeoMap={aeoMap} globalMax={globalMax} globalDates={globalDates} /></SeoSummaryProvider>
     </div>
   )
 }
@@ -225,7 +226,7 @@ let PropertyRow = ({ property, gaData, aeoData, globalMax, globalDates }: { prop
 
   return (
     <tr className="prop-row-link">
-      <td className="prop-name"><a href={href} className="row-link">{cleanUrl(property.site_url)}</a></td>
+      <td className="prop-name"><a href={href} className="row-link">{cleanUrl(property.site_url)}<SeoSummary siteUrl={property.site_url} /></a></td>
       <td className="num-cell"><a href={href} className="row-link">{formatNumber(property.impressions)}</a></td>
       <td className="num-cell"><a href={href} className="row-link">{formatNumber(property.clicks)}</a></td>
       <td className="num-cell"><a href={href} className="row-link">{formatCtr(property.ctr)}</a></td>

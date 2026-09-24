@@ -10,7 +10,7 @@ import { fetchPropertyDetail, fetchGaSessions, fetchDimension } from "../lib/api
 import { formatNumber, formatTipNumber, formatCtr, formatPosition, formatAxisNumber, cleanUrl } from "../lib/format"
 import { DayButton } from "../components/DayButton"
 import { ThemeToggle } from "../components/ThemeToggle"
-import { AeoSection } from "../components/AeoSection"
+import { SeoWorkspace } from "../components/seo/SeoWorkspace"
 
 let GA_METRICS: [string, string, string][] = [
   ["sessions", "Sessions", "var(--chart-teal)"],
@@ -124,7 +124,7 @@ export let Detail = () => {
         </div>
       </header>
 
-      <DetailContent
+      <SeoWorkspace key={siteUrl} siteUrl={siteUrl}><DetailContent
         prop={prop}
         siteUrl={siteUrl}
         days={days}
@@ -132,7 +132,7 @@ export let Detail = () => {
         gaLoading={gaLoading}
         gaMetric={gaMetric}
         setGaMetric={setGaMetric}
-      />
+      /></SeoWorkspace>
     </div>
   )
 }
@@ -238,7 +238,6 @@ let DetailContent = ({
         gaLoading={gaLoading}
       />
 
-      <AeoSection siteUrl={siteUrl} />
 
       <DimensionTabs siteUrl={siteUrl} days={days} />
     </>
@@ -399,7 +398,7 @@ let DetailChart = ({
             <YAxis
               yAxisId="clicks"
               orientation={leftMetric === "clicks" ? "left" : "right"}
-              hide={!showClicks || (leftMetric !== "clicks" && rightMetric !== "clicks")}
+              hide={!showClicks || leftMetric !== "clicks"}
               tick={{ fill: "var(--green)", fontSize: 9, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}
@@ -426,8 +425,8 @@ let DetailChart = ({
             <YAxis yAxisId="position" hide reversed domain={[0, "dataMax"]} />
             <YAxis
               yAxisId="ga"
-              orientation={leftMetric === "ga" ? "left" : "right"}
-              hide={!showGa || (leftMetric !== "ga" && rightMetric !== "ga")}
+              orientation="right"
+              hide={!showGa || rightMetric !== "ga"}
               tick={{ fill: gaColor, fontSize: 9, fontFamily: "var(--mono)" }}
               tickFormatter={formatAxisNumber}
               width={44}

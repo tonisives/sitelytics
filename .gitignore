@@ -1,3 +1,7 @@
 target
 local
 Makefile
+
+.worktrees/
+browser-worker/node_modules/
+browser-worker/.active-pane.json

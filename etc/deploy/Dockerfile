@@ -8,10 +8,10 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY migrations migrations
 RUN mkdir src && echo 'fn main() {}' > src/main.rs
-RUN cargo build --release 2>/dev/null; exit 0
+RUN cargo build --release -j4 2>/dev/null; exit 0
 
 COPY src src
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release -j4
 
 # -- Frontend build --
 FROM node:22-slim AS frontend-builder

@@ -1,0 +1,29 @@
+.workspace { margin-top: 20px; }
+.tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.workspace button { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 9px 14px; border-radius: 5px; cursor: pointer; font: inherit; white-space: nowrap; }
+.workspace button:hover { background: var(--surface-hover); }
+.workspace button[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.workspace button:disabled { opacity: .55; cursor: default; }
+.workspace input:not([type="checkbox"]), .workspace textarea, .workspace select { width: 100%; border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 10px; border-radius: 4px; font: inherit; }
+.workspace textarea { resize: vertical; }
+.workspace label { display: grid; gap: 8px; font-size: 13px; }
+.workspace p { color: var(--text-muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings, .module { display: grid; gap: 20px; }
+.settings { max-width: 1000px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+.modules { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; }
+.modules fieldset { border: 1px solid var(--border); padding: 14px; display: grid; gap: 12px; }
+.modules label { display: flex; align-items: center; }
+.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.actions h2 { margin-right: auto; }
+.history, .search { max-width: 500px; }
+.results { display: grid; gap: 16px; min-width: 0; }
+.meta { font-family: var(--mono); }
+.table { overflow-x: auto; border: 1px solid var(--border); background: var(--surface); max-width: 100%; }
+.table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th, .table td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; min-width: 90px; max-width: 420px; overflow-wrap: anywhere; }
+.table th { color: var(--text-muted); white-space: nowrap; font-weight: 500; }
+.table a { color: var(--accent); }
+.empty { padding: 24px 0; }
+.workspace summary { cursor: pointer; padding: 12px 0; }
+.summary { display: block; font-size: 11px; color: var(--text-muted); margin-top: 6px; }

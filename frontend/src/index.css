@@ -700,3 +700,10 @@ h2 {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+@media (max-width: 640px) {
+  .dash-header:has(.detail-title-row) { flex-wrap: wrap; gap: 16px; }
+  .detail-title-row { flex-wrap: wrap; min-width: 0; }
+  .detail-title-row h1 { overflow-wrap: anywhere; }
+  .detail-title-row .gsc-link { white-space: nowrap; }
+}

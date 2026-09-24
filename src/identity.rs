@@ -219,6 +219,20 @@ pub async fn session(state: &AppState, headers: &HeaderMap) -> Result<SessionDat
             .try_get("is_admin")
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     };
+    let access_token = access_token_for_user(state, user.id).await?;
+    Ok(SessionData { user, access_token })
+}
+
+pub async fn access_token_for_user(
+    state: &AppState,
+    user_id: uuid::Uuid,
+) -> Result<String, StatusCode> {
+    let row = sqlx::query("SELECT * FROM oauth_credentials WHERE user_id=$1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
     let expires_at: DateTime<Utc> = row
         .try_get("access_token_expires_at")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -226,7 +240,7 @@ pub async fn session(state: &AppState, headers: &HeaderMap) -> Result<SessionDat
         .try_get("access_token")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if expires_at > Utc::now() + Duration::minutes(1) {
-        return Ok(SessionData { user, access_token });
+        return Ok(access_token);
     }
     let encrypted: Vec<u8> = row
         .try_get("encrypted_refresh_token")
@@ -252,12 +266,9 @@ pub async fn session(state: &AppState, headers: &HeaderMap) -> Result<SessionDat
         .await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
     sqlx::query("UPDATE oauth_credentials SET access_token=$2,access_token_expires_at=$3,updated_at=now() WHERE user_id=$1")
-        .bind(user.id).bind(&refreshed.access_token).bind(Utc::now() + Duration::seconds(refreshed.expires_in))
+        .bind(user_id).bind(&refreshed.access_token).bind(Utc::now() + Duration::seconds(refreshed.expires_in))
         .execute(&state.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(SessionData {
-        user,
-        access_token: refreshed.access_token,
-    })
+    Ok(refreshed.access_token)
 }
 
 pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {

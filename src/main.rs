@@ -1,6 +1,7 @@
 mod aeo;
 mod api;
 mod identity;
+mod seo;
 mod state;
 mod worker;
 
@@ -29,12 +30,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(std::io::Error::other)
             .map_err(Into::into);
     }
+    if std::env::args().nth(1).as_deref() == Some("seo-worker") {
+        return seo::worker::run(state)
+            .await
+            .map_err(std::io::Error::other)
+            .map_err(Into::into);
+    }
     let port = std::env::var("API_PORT").unwrap_or_else(|_| "19100".into());
     let addr = format!("0.0.0.0:{port}");
 
     let cors = CorsLayer::permissive();
 
     let app = Router::new()
+        .route("/api/health", axum::routing::get(api_health))
         .route("/auth/google", axum::routing::get(identity::auth_google))
         .route(
             "/auth/callback",
@@ -62,6 +70,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/aeo/dashboard", axum::routing::post(aeo::dashboard))
         .route("/api/aeo/results", axum::routing::get(aeo::results))
         .route("/api/admin/usage", axum::routing::get(aeo::admin_usage))
+        .route(
+            "/api/seo/site",
+            axum::routing::get(seo::api::get_site).put(seo::api::save_site),
+        )
+        .route("/api/seo/jobs", axum::routing::post(seo::api::run))
+        .route(
+            "/api/seo/jobs/{id}",
+            axum::routing::get(seo::api::get_job).delete(seo::api::cancel),
+        )
+        .route("/api/seo/summary", axum::routing::get(seo::api::summary))
+        .route(
+            "/api/seo/browser/jobs/{id}",
+            axum::routing::get(seo::api::browser_job),
+        )
+        .route("/api/seo/health", axum::routing::get(seo::api::health))
         .layer(cors)
         .with_state(state);
 
@@ -257,4 +280,15 @@ async fn api_ga_dashboard(
     }
 
     Json(result).into_response()
+}
+
+async fn api_health(State(state): State<state::AppState>) -> Response {
+    match sqlx::query("SELECT 1").execute(&state.db).await {
+        Ok(_) => Json(serde_json::json!({"status":"ok"})).into_response(),
+        Err(_) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "Database unavailable",
+        )
+            .into_response(),
+    }
 }

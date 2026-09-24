@@ -8,6 +8,8 @@ name = "sitelytics"
 path = "src/main.rs"
 
 [dependencies]
+scraper = "0.24"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 http = "1"

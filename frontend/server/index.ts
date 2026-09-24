@@ -59,6 +59,8 @@ let start = async () => {
       if (typeof value === "string") headers[key] = value
     }
     delete headers.host
+    // The parsed JSON is serialized again below, so its byte length can change.
+    delete headers["content-length"]
 
     try {
       let res = await fetch(url, {
