@@ -139,7 +139,7 @@ Use **Run now** for a manual snapshot, or opt into a weekly schedule. Disabling 
 module cancels pending work and retains its history. The overview remains GSC/GA4.
 
 Keywords use paginated GSC query/page data and compare two complete 28-day periods.
-Rankings and research use the existing bmux host. Country/language are requested
+Rankings and research use the shared k3s Chrome queue. Country/language are requested
 search hints, and observed rankings remain separate from GSC average positions.
 Link research discovers and inspects candidate pages; it is not a comprehensive
 backlink index. Audits crawl public same-site pages, respect robots.txt, and show
@@ -150,9 +150,9 @@ Run `cargo run -- seo-worker` alongside the API. Deploy the same image using
 `SEO_BROWSER_TOKEN` (at least 32 characters) in the existing secret. Provision
 one-partition topics `sitelytics.seo.browser.requests` and
 `sitelytics.seo.browser.responses`, each with seven-day retention. Follow
-`browser-worker/README.md` for the supervised local bmux worker. The browser token
+`browser-worker/README.md` for the k3s browser worker deployment. The browser token
 is used only by the narrow job-status endpoint and must never be committed.
 
 No DataForSEO or OpenRouter credentials are needed. Structured results are kept
-for twelve months. Jobs expire after 24 hours when the browser machine is offline.
+for twelve months. Jobs expire after 24 hours when the browser worker is offline.
 Admin usage reports worker heartbeats, pending jobs and recent failures.

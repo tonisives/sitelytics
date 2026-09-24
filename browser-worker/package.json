@@ -1,1 +1,1 @@
-{"name":"sitelytics-seo-browser","private":true,"type":"module","scripts":{"start":"node worker.mjs","test":"node --test test.mjs"},"dependencies":{"kafkajs":"2.2.4"}}
+{"name":"sitelytics-seo-browser","private":true,"type":"module","scripts":{"start":"node worker.mjs","test":"node --test test.mjs"},"dependencies":{"cheerio":"^1.1.2","kafkajs":"2.2.4"}}

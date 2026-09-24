@@ -202,7 +202,7 @@ async fn ingest(state: &AppState, payload: &[u8]) -> Result<(), String> {
         return Ok(());
     };
     if value["type"] == "heartbeat" {
-        sqlx::query("INSERT INTO seo_worker_health(worker,detail) VALUES('bmux',$1) ON CONFLICT(worker) DO UPDATE SET heartbeat_at=now(),detail=EXCLUDED.detail").bind(&value).execute(&state.db).await.map_err(|e|e.to_string())?;
+        sqlx::query("INSERT INTO seo_worker_health(worker,detail) VALUES('chrome-queue',$1) ON CONFLICT(worker) DO UPDATE SET heartbeat_at=now(),detail=EXCLUDED.detail").bind(&value).execute(&state.db).await.map_err(|e|e.to_string())?;
         return Ok(());
     }
     let Some(id) = value["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) else {

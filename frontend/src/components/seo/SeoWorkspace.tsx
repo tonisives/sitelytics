@@ -80,12 +80,12 @@ let ModuleView = ({ module, view, site, run, cancel, busy, save }: { module: Mod
  let start = () => { void run(module) }
  let stop = () => { if (active) void cancel(active.id) }
  let choose = (event: React.ChangeEvent<HTMLSelectElement>) => setSelected(event.target.value)
- let browser = site.workers?.find(worker => worker.worker === "bmux")
+ let browser = site.workers?.find(worker => worker.worker === "chrome-queue")
  let online = browser && Date.now() - Date.parse(browser.heartbeat_at) < 120000
  let title = view === "competitors" ? "Competitors" : view === "links" ? "Link prospects" : LABELS[module]
  if (!site.config.modules[module].enabled) return <section className={styles.empty}><h2>{title}</h2><p>This module is disabled for this website. Enable it in SEO settings to start collecting data.</p></section>
  return <section className={styles.module}>
-  <div className={styles.actions}><h2>{title}</h2><button type="button" disabled={busy || !!active} onClick={start}>Run now</button>{active && <><span role="status">{active.status === "waiting_browser" ? online ? "Browser research queued or running" : "Waiting for bmux machine" : active.status}</span><button type="button" onClick={stop}>Cancel</button></>}</div>
+  <div className={styles.actions}><h2>{title}</h2><button type="button" disabled={busy || !!active} onClick={start}>Run now</button>{active && <><span role="status">{active.status === "waiting_browser" ? online ? "Browser research queued or running" : "Waiting for browser worker" : active.status}</span><button type="button" onClick={stop}>Cancel</button></>}</div>
   {jobs[0]?.error && <p className="error-text">Last run: {jobs[0].error}</p>}
   {jobs.length > 0 && <label className={styles.history}>Run history<select value={latest?.id || ""} onChange={choose}><option value="">Latest available result</option>{jobs.map(job => <option value={job.id} key={job.id}>{date(job.created_at)} · {job.status}</option>)}</select></label>}
   {historyError && <p className="error-text">{historyError}</p>}
@@ -102,7 +102,7 @@ let Results = ({ job, view, config, save }: { job: Job; view: Tab; config: Setti
  let browser = result.browser_context as Record<string, unknown> | undefined
  let filtered = (data: DataRow[]) => data.filter(row => !query || JSON.stringify(row).toLowerCase().includes(query))
  return <div className={styles.results}>
-  <p className={styles.meta}>{text(result.source || "bmux browser observation")} · {date(result.collected_at || job.completed_at)} · {job.status === "partial" ? "Partial coverage" : job.status}</p>
+  <p className={styles.meta}>{text(result.source || "Browser observation")} · {date(result.collected_at || job.completed_at)} · {job.status === "partial" ? "Partial coverage" : job.status}</p>
   {job.error && <p className="error-text">{job.error}</p>}
   {period && <p>{text(period.start)} to {text(period.end)}, compared with {text(period.previous_start)} to {text(period.previous_end)}.</p>}
   {coverage && <p>{coverage.visited != null ? `${text(coverage.visited)} pages checked · limit ${text(coverage.page_limit)} · ${text(coverage.remaining)} URLs remaining.` : text(coverage.note)}{coverage.capped === true ? " Collection limit reached; some queries may be missing." : ""}</p>}
