@@ -2,8 +2,8 @@ import { Kafka, logLevel } from "kafkajs"
 import { randomUUID } from "node:crypto"
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { extractSerp, extractPage, rankResult } from "./extract.mjs"
-import { competitorCandidates, researchQueries, validateCompetitor } from "./research.mjs"
+import { extractBingSerp, extractSerp, extractPage, rankResult } from "./extract.mjs"
+import { candidateInspectionUrl, competitorCandidates, researchQueries, validateCompetitor } from "./research.mjs"
 let brokers = process.env.KAFKA_BROKERS?.split(",")
 let base = process.env.SITELYTICS_URL
 let token = process.env.SEO_BROWSER_TOKEN
@@ -72,14 +72,15 @@ let processJob = async (job, heartbeat) => {
  {
   let context = (job.config.product_context || "").trim()
   let knownCompetitors = (job.config.competitors || []).map(domain => domain.replace(/^www\./, ""))
-  if (job.kind === "research") { result.research_version = 2; result.product_context = context }
+  if (job.kind === "research") { result.research_version = 2; result.product_context = context; result.browser_context.search_engine = "Bing" }
   let queries = job.kind === "rankings" ? job.config.keywords.slice(0, 100) : job.kind === "research" ? researchQueries(context) : []
   if (job.kind === "research" && !context) throw new Error("Set the product context in SEO settings before competitor research")
   for (let keyword of [...new Set(queries)]) {
    try {
-    let url = new URL("https://www.google.com/search");url.search = new URLSearchParams({ q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
+    let url = new URL(job.kind === "research" ? "https://www.bing.com/search" : "https://www.google.com/search")
+    url.search = new URLSearchParams(job.kind === "research" ? { q: keyword } : { q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
     let page = await navigate(url.href)
-    let snapshot = extractSerp(page.html, page.url)
+    let snapshot = job.kind === "research" ? extractBingSerp(page.html, page.url) : extractSerp(page.html, page.url)
     for (let entry of snapshot.entries) {
      let redirect = new URL(entry.url)
      if (redirect.hostname !== "www.google.com" || !["/goto", "/url"].includes(redirect.pathname)) continue
@@ -96,7 +97,7 @@ let processJob = async (job, heartbeat) => {
     let rank = rankResult(snapshot, root.hostname)
     result.snapshots.push({ keyword, ...snapshot, ...rank })
     result.suggestions.push(...snapshot.suggestions.map(text => ({ keyword: text, seed: keyword })))
-    if (snapshot.blocked) { result.errors.push({ keyword, error: "Google blocked this request; research paused" }); break }
+    if (snapshot.blocked) { result.errors.push({ keyword, error: "Search engine blocked this request; research paused" }); break }
     if (rank.status === "unknown") result.errors.push({ keyword, error: "SERP layout could not be parsed" })
    } catch (error) { result.errors.push({ keyword, error: error.message }); if (/cancelled|authorization|rate.limit|captcha|challenge|consent|blocked/i.test(error.message)) break }
   }
@@ -106,7 +107,9 @@ let processJob = async (job, heartbeat) => {
    for (let domain of knownCompetitors) if (!discovered.some(item => item.domain === domain)) discovered.push({ domain, appearances: 0, best_position: null, matched_terms: [], result_url: `https://${domain}/`, result_title: domain })
    for (let candidate of discovered.slice(0, 10)) {
     try {
-     let rendered = await navigate(candidate.result_url)
+     let inspectionUrl = candidateInspectionUrl(candidate)
+     if (!inspectionUrl) continue
+     let rendered = await navigate(inspectionUrl)
      let page = extractPage(rendered.html, rendered.url)
      let verified = validateCompetitor(candidate, page, context, knownCompetitors)
      if (verified) confirmed.push(verified)
@@ -115,15 +118,15 @@ let processJob = async (job, heartbeat) => {
    for (let competitor of confirmed.slice(0, 3)) queries.push(`"${competitor.domain}" -site:${competitor.domain} resources`)
    for (let keyword of [...new Set(queries)].slice(3)) {
     try {
-     let url = new URL("https://www.google.com/search"); url.search = new URLSearchParams({ q: keyword, hl: job.config.language, gl: job.config.country, pws: "0", num: "20" }).toString()
+     let url = new URL("https://www.bing.com/search"); url.search = new URLSearchParams({ q: keyword }).toString()
      let page = await navigate(url.href)
-     let snapshot = extractSerp(page.html, page.url)
+     let snapshot = extractBingSerp(page.html, page.url)
      result.snapshots.push({ keyword, ...snapshot })
-     if (snapshot.blocked) { result.errors.push({ keyword, error: "Google blocked this request; link research paused" }); break }
+     if (snapshot.blocked) { result.errors.push({ keyword, error: "Search engine blocked this request; link research paused" }); break }
     } catch (error) { result.errors.push({ keyword, error: error.message }); if (/cancelled|authorization|rate.limit|captcha|challenge|consent|blocked/i.test(error.message)) break }
    }
   }
-  let candidates = job.kind === "audit" ? job.config.render_urls.slice(0, 5) : job.kind === "research" ? [...new Set([...job.config.link_candidates, ...result.snapshots.slice(3).flatMap(s => s.entries.map(e => e.url))])].filter(url => { try { let host = new URL(url).hostname; return host !== root.hostname && !confirmed.some(item => host === item.domain || host.endsWith(`.${item.domain}`)) } catch { return false } }).slice(0, 25) : []
+  let candidates = job.kind === "audit" ? job.config.render_urls.slice(0, 5) : job.kind === "research" ? [...new Set([...job.config.link_candidates, ...result.snapshots.flatMap(s => s.entries.map(e => e.url))])].filter(url => { try { let host = new URL(url).hostname; return host !== root.hostname && !confirmed.some(item => host === item.domain || host.endsWith(`.${item.domain}`)) } catch { return false } }).slice(0, 20) : []
   for (let address of candidates) {
    try {
     let rendered = await navigate(address)

@@ -18,7 +18,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: worker
-          image: registry.tonisives.com/tgs/sitelytics-seo-browser:seo-20260925-1@sha256:3d0fcf191e980cb9d5f955145f4774bc76923bd4fbb3f7fe36473eec2d025a0a
+          image: registry.tonisives.com/tgs/sitelytics-seo-browser:seo-20260925-3@sha256:99f863f079508242edac28faffa92a289c3975985e3e67dce1a06cf6c4d18015
           envFrom:
             - secretRef:
                 name: sitelytics-secrets

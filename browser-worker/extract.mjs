@@ -22,6 +22,27 @@ export let extractSerp = (html, pageUrl) => {
  return { entries, suggestions: [...new Set(suggestions)].slice(0, 20), blocked: false, actual_url: pageUrl, language: $("html").attr("lang"), explicit_empty: /did not match any documents|no results found/i.test(body) }
 }
 
+export let extractBingSerp = (html, pageUrl) => {
+ let $ = load(html), entries = [], seen = new Set()
+ $("li.b_algo").each((_, result) => {
+  let anchor = $(result).find("h2 a").first(), href = absolute(anchor.attr("href"), pageUrl)
+  if (!href || entries.length >= 20) return
+  let url
+  try {
+   url = new URL(href)
+   if (url.hostname === "www.bing.com" && url.pathname === "/ck/a") {
+    let encoded = url.searchParams.get("u") || ""
+    if (!encoded.startsWith("a1")) return
+    url = new URL(Buffer.from(encoded.slice(2), "base64").toString("utf8"))
+   }
+  } catch { return }
+  if (!/^https?:$/.test(url.protocol) || seen.has(url.href)) return
+  seen.add(url.href)
+  entries.push({ position: entries.length + 1, url: url.href, domain: url.hostname, title: anchor.text().trim(), snippet: $(result).find(".b_caption p").first().text().trim().slice(0, 1500) })
+ })
+ return { entries, suggestions: [], blocked: /unusual traffic|verify you are a human|captcha/i.test($("body").text()), actual_url: pageUrl, explicit_empty: /no results found|there are no results/i.test($("body").text()) }
+}
+
 export let extractPage = (html, pageUrl) => {
  let $ = load(html), body = $("body").text()
  return {

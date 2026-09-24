@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { extractPage, extractSerp, rankResult } from "./extract.mjs"
-import { competitorCandidates, validateCompetitor } from "./research.mjs"
+import { extractBingSerp, extractPage, extractSerp, rankResult } from "./extract.mjs"
+import { candidateInspectionUrl, competitorCandidates, validateCompetitor } from "./research.mjs"
 test("unknown is distinct from not observed", () => {
  assert.equal(rankResult({ entries: [] }, "example.com").status, "unknown")
  assert.equal(rankResult({ entries: [], blocked: true }, "example.com").status, "blocked")
@@ -23,6 +23,12 @@ test("rendered page HTML resolves links against the final URL", () => {
  assert.deepEqual(page.links, ["https://example.com/next"])
  assert.deepEqual(page.h1, ["Heading"])
 })
+test("Bing HTML resolves redirect destinations for competitor research", () => {
+ let encoded = `a1${Buffer.from("https://ideas.example/product").toString("base64")}`
+ let html = `<html><body><li class="b_algo"><h2><a href="https://www.bing.com/ck/a?u=${encoded}">Business idea tool</a></h2><div class="b_caption"><p>Software for founders</p></div></li></body></html>`
+ let result = extractBingSerp(html, "https://www.bing.com/search?q=business+ideas")
+ assert.deepEqual(result.entries.map(entry => [entry.domain, entry.url, entry.position]), [["ideas.example", "https://ideas.example/product", 1]])
+})
 test("context research excludes stock analysis and confirms product matches", () => {
  let context = "Business idea discovery, early market signals for founders"
  let snapshots = [{ entries: [
@@ -32,6 +38,9 @@ test("context research excludes stock analysis and confirms product matches", ()
  ] }]
  let candidates = competitorCandidates(snapshots, context, "trend-seeker.app")
  assert.deepEqual(candidates.map(item => item.domain), ["ideas.example"])
- assert.equal(validateCompetitor(candidates[0], { url: "https://ideas.example/", title: "Business idea discovery", description: "Emerging market signals for founders", h1: [], excerpt: "" }, context)?.domain, "ideas.example")
+ assert.equal(validateCompetitor(candidates[0], { url: "https://ideas.example/", title: "Business idea discovery tool", description: "Emerging market signals for founders", h1: [], excerpt: "" }, context)?.domain, "ideas.example")
  assert.equal(validateCompetitor(candidates[0], { url: "https://ideas.example/", title: "Stock charts", description: "Technical analysis", h1: [], excerpt: "" }, context), null)
+ assert.equal(candidateInspectionUrl({ domain: "ideas.example", result_url: "https://ideas.example/blog/best-tools" }), "https://ideas.example/")
+ assert.equal(candidateInspectionUrl({ domain: "blog.writer.example", result_url: "https://blog.writer.example/best-tools" }), null)
+ assert.equal(validateCompetitor(candidates[0], { url: "https://ideas.example/blog/best-tools", title: "Business idea discovery tools", description: "Software for founders", h1: [], excerpt: "" }, context), null)
 })

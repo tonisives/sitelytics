@@ -9,8 +9,17 @@ export let matchedTerms = (context, value) => {
 let focusTerms = context => contextTerms(context.split(/[,;.!?\n]/)[0]).slice(0, 5)
 let hasContext = (context, matches) => matches.length >= 2 && matches.some(word => focusTerms(context).includes(word))
 export let researchQueries = context => {
- let phrase = context.trim().split(/[.!?\n]/)[0].slice(0, 100)
- return [`${phrase} tools`, `${phrase} alternatives`, `${phrase} for businesses`]
+ let clauses = context.trim().split(/[,;.!?\n]/).map(value => value.trim()).filter(Boolean)
+ let focus = clauses[0]?.slice(0, 80) || context.slice(0, 80)
+ let adjacent = (clauses[1] || focus).split(/\band\b/i)[0].trim().slice(0, 80)
+ return [`${focus} software`, `${focus} tools`, `${adjacent} software`]
+}
+let articlePath = /^\/(blog|blogs|article|articles|post|posts|news|guide|guides|review|reviews|resources)(\/|$)/i
+export let candidateInspectionUrl = candidate => {
+ if (candidate.domain.startsWith("blog.")) return null
+ let url
+ try { url = new URL(candidate.result_url) } catch { return null }
+ return articlePath.test(url.pathname) ? `https://${candidate.domain}/` : url.href
 }
 export let isCandidateHost = (host, ownHost) => {
  let normalized = host.replace(/^www\./, "")
@@ -36,7 +45,10 @@ export let validateCompetitor = (candidate, page, context, known = []) => {
  let host
  try { host = new URL(page.url).hostname.replace(/^www\./, "") } catch { return null }
  if (host !== candidate.domain && !host.endsWith(`.${candidate.domain}`)) return null
- let matches = matchedTerms(context, `${page.title || ""} ${page.description || ""} ${(page.h1 || []).join(" ")} ${page.excerpt || ""}`)
- if (!hasContext(context, matches) && !known.includes(candidate.domain)) return null
+ if (!known.includes(candidate.domain) && (host.startsWith("blog.") || articlePath.test(new URL(page.url).pathname))) return null
+ let metadata = `${page.title || ""} ${page.description || ""} ${(page.h1 || []).join(" ")}`
+ let matches = matchedTerms(context, metadata)
+ let offersProduct = /\b(software|platform|tool|app|suite|product|workspace|service)\b/i.test(metadata) || /\b(sign up|get started|start free|try free)\b/i.test((page.excerpt || "").slice(0, 1000))
+ if ((!hasContext(context, matches) || !offersProduct) && !known.includes(candidate.domain)) return null
  return { ...candidate, matched_terms: [...new Set([...candidate.matched_terms, ...matches])], page_url: page.url, page_title: page.title, description: page.description, confirmed_by: known.includes(candidate.domain) ? "Saved competitor" : "Context match on website" }
 }
