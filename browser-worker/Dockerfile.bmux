@@ -1,0 +1,10 @@
+ARG BMUX_IMAGE=bmux-host:local
+FROM ${BMUX_IMAGE}
+USER root
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY worker.mjs extract.mjs research.mjs bmux.mjs supervise.mjs ./
+ENV SEO_BROWSER_BACKEND=bmux
+USER node
+ENTRYPOINT ["tini", "--", "node", "supervise.mjs"]

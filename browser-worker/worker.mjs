@@ -1,3 +1,4 @@
+import { createBmuxBrowser } from "./bmux.mjs"
 import { Kafka, logLevel } from "kafkajs"
 import { randomUUID } from "node:crypto"
 import { lookup } from "node:dns/promises"
@@ -8,15 +9,18 @@ let brokers = process.env.KAFKA_BROKERS?.split(",")
 let base = process.env.SITELYTICS_URL
 let token = process.env.SEO_BROWSER_TOKEN
 if (!brokers?.length || !base || !token) throw new Error("KAFKA_BROKERS, SITELYTICS_URL and SEO_BROWSER_TOKEN are required")
+let pilot = process.env.SEO_BROWSER_BACKEND === "bmux"
+if (process.env.SEO_BROWSER_BACKEND && !["bmux", "queue"].includes(process.env.SEO_BROWSER_BACKEND)) throw new Error("Unsupported browser backend")
 let kafka = new Kafka({ clientId: "sitelytics-seo-browser", brokers, logLevel: logLevel.ERROR })
 let producer = kafka.producer()
-let consumer = kafka.consumer({ groupId: "sitelytics-seo-browser-v2", sessionTimeout: 60000 })
+let consumer = kafka.consumer({ groupId: pilot ? "sitelytics-seo-bmux-pilot-v1" : "sitelytics-seo-browser-v2", sessionTimeout: 60000 })
 let scrapeConsumer = kafka.consumer({ groupId: "sitelytics-seo-scrape-results-v1" })
-let responseTopic = "sitelytics.seo.browser.responses"
+let responseTopic = pilot ? "sitelytics.seo.browser.pilot.responses" : "sitelytics.seo.browser.responses"
 let scrapeRequests = "tskr.scrape.headless.requests"
 let scrapeResponses = "tskr.scrape.responses"
 let pending = new Map()
 let sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+let bmux = pilot ? createBmuxBrowser({ authorized: id => authorized(id) }) : undefined
 let lastResearchSearch = 0
 let searchResearch = async (job, query, heartbeat) => {
  if (!(await authorized(job.id))) throw new Error("Job cancelled")
@@ -25,6 +29,12 @@ let searchResearch = async (job, query, heartbeat) => {
  lastResearchSearch = Date.now()
  let url = new URL("https://lite.duckduckgo.com/lite/")
  url.searchParams.set("q", query)
+ if (bmux) {
+  let page = await bmux.render(job, url)
+  await publicUrl(page.url)
+  if (new URL(page.url).hostname !== "lite.duckduckgo.com") throw new Error("Search redirected away from DuckDuckGo")
+  return extractDuckDuckGoLite(page.html, page.url)
+ }
  let response = await fetch(url, { redirect: "manual", headers: { "User-Agent": "Mozilla/5.0 (compatible; SitelyticsSEO/1.0)" }, signal: AbortSignal.timeout(30000) })
  if (!response.ok) throw new Error(`Search returned HTTP ${response.status}`)
  await publicUrl(response.url)
@@ -36,6 +46,7 @@ let searchResearch = async (job, query, heartbeat) => {
  return snapshot
 }
 let scrape = async (job, url) => {
+ if (bmux) { let page = await bmux.render(job, url); await publicUrl(page.url); return page }
  let requestId = `sitelytics-seo:${job.id}:${randomUUID()}`
  let response = new Promise((resolve, reject) => {
   let timer = setTimeout(() => { pending.delete(requestId); reject(new Error("Chrome queue response timed out")) }, 600000)
@@ -79,7 +90,8 @@ let processJob = async (job, heartbeat) => {
  if (job.version !== 1 || !["rankings", "research", "audit"].includes(job.kind) || !/^[a-f0-9-]{36}$/.test(job.id)) throw new Error("Unsupported browser job")
  if (Date.parse(job.expires_at) < Date.now() || !(await authorized(job.id))) return
  let root = await publicUrl(job.config.root_url)
- let result = { source: job.kind === "research" ? "remote search and shared Chrome observations" : "shared Chrome queue observation", collected_at: new Date().toISOString(), browser_context: { device: "desktop", requested_country: job.config.country, requested_language: job.config.language, location_precision: "Browser IP region; requested country is a hint, not verified geolocation" }, snapshots: [], pages: [], prospects: [], suggestions: [], errors: [] }
+ if (bmux) await bmux.begin(job, heartbeat)
+ let result = { source: pilot ? "bmux pilot browser observation" : job.kind === "research" ? "remote search and shared Chrome observations" : "shared Chrome queue observation", collected_at: new Date().toISOString(), browser_context: { device: "desktop", requested_country: job.config.country, requested_language: job.config.language, location_precision: "Browser IP region; requested country is a hint, not verified geolocation" }, snapshots: [], pages: [], prospects: [], suggestions: [], errors: [] }
  let navigate = async address => {
   if (!(await authorized(job.id))) throw new Error("Job cancelled")
   await heartbeat()
@@ -109,6 +121,12 @@ let processJob = async (job, heartbeat) => {
      try {
       if (!(await authorized(job.id))) throw new Error("Job cancelled")
       await sleep(1000)
+      if (bmux) {
+       let page = await scrape(job, redirect)
+       let resolved = await publicUrl(page.url)
+       entry.url = resolved.href; entry.domain = resolved.hostname
+       continue
+      }
       let response = await fetch(redirect, { redirect: "manual", signal: AbortSignal.timeout(15000) })
       let target = response.headers.get("location")
       if (!target || !/^https?:\/\//.test(target)) throw new Error("Unresolved Google result redirect")
@@ -166,9 +184,12 @@ let processJob = async (job, heartbeat) => {
   let incomplete = result.errors.length > 0
   if (job.kind === "audit") { result.render_errors = result.errors; delete result.errors; result.rendered_pages = result.pages;delete result.pages;delete result.source;delete result.collected_at }
   if (await authorized(job.id)) await send({ id: job.id, status: incomplete ? "partial" : "succeeded", result })
+  return incomplete ? "failed" : "succeeded"
  }
 }
-await producer.connect(); await scrapeConsumer.connect()
+await producer.connect()
+if (!pilot) {
+await scrapeConsumer.connect()
 await scrapeConsumer.subscribe({ topic: scrapeResponses, fromBeginning: false })
 await scrapeConsumer.run({ eachMessage: async ({ message }) => {
  let id = message.key?.toString()
@@ -177,17 +198,18 @@ await scrapeConsumer.run({ eachMessage: async ({ message }) => {
  if (!resolve) return
  try { resolve(JSON.parse(message.value.toString())) } catch { resolve({ status: "failed", error: { message: "Invalid Chrome queue response" } }) }
 }})
+}
 await consumer.connect()
-await consumer.subscribe({ topic: "sitelytics.seo.browser.requests", fromBeginning: true })
+await consumer.subscribe({ topic: pilot ? "sitelytics.seo.browser.pilot.requests" : "sitelytics.seo.browser.requests", fromBeginning: true })
 let heartbeatTimer = setInterval(() => send({ type: "heartbeat", time: new Date().toISOString() }).catch(() => {}), 30000)
 await send({ type: "heartbeat", time: new Date().toISOString() })
 await consumer.run({ autoCommit: false, eachMessage: async ({ topic, partition, message, heartbeat }) => {
- let job
+ let job, outcome
  let keepAlive = setInterval(() => heartbeat().catch(() => {}), 10000)
- try { job = JSON.parse(message.value.toString()); await processJob(job, heartbeat) }
+ try { job = JSON.parse(message.value.toString()); outcome = await processJob(job, heartbeat) }
  catch (error) { if (job?.id) await send({ id: job.id, status: "failed", error: error.message, result: {} }); else console.error("Invalid SEO browser request") }
- finally { clearInterval(keepAlive) }
+ finally { if (bmux && job?.id) await bmux.end(job.id, outcome); clearInterval(keepAlive) }
  await consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }])
 }})
-let shutdown = async () => { clearInterval(heartbeatTimer);await consumer.disconnect();await scrapeConsumer.disconnect();await producer.disconnect();process.exit(0) }
+let shutdown = async () => { clearInterval(heartbeatTimer);await consumer.disconnect();if (!pilot) await scrapeConsumer.disconnect();await producer.disconnect();process.exit(0) }
 process.on("SIGTERM", shutdown);process.on("SIGINT", shutdown)
