@@ -111,6 +111,12 @@ docker run -p 19000:19000 \
   sitelytics
 ```
 
+The GitHub Actions `Release` workflow deploys `main` when manually dispatched.
+Configure the repository secrets `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`, and
+`DEPLOY_SSH_KEY` first. The SSH key must be authorized on the Kubernetes release
+host. The workflow builds and pushes a Linux amd64 image, then rolls out the
+Sitelytics app and SEO worker deployments in the `utils` namespace.
+
 ## Project structure
 
 ```
