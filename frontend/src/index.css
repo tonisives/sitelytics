@@ -299,10 +299,25 @@ h2 {
 
 .property-table-card .prop-table {
   min-width: 1000px;
+  table-layout: fixed;
 }
 
 .property-table-card .prop-name {
+  width: 22%;
   white-space: nowrap;
+}
+
+.property-table-card .prop-domain,
+.property-table-card .prop-name small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.property-table-card .sparkline-header,
+.property-table-card .sparkline-cell {
+  width: 15%;
 }
 
 .prop-table {

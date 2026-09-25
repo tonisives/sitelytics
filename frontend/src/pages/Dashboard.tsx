@@ -226,7 +226,7 @@ let PropertyRow = ({ property, gaData, aeoData, globalMax, globalDates }: { prop
 
   return (
     <tr className="prop-row-link">
-      <td className="prop-name"><a href={href} className="row-link">{cleanUrl(property.site_url)}<SeoSummary siteUrl={property.site_url} /></a></td>
+      <td className="prop-name"><a href={href} className="row-link"><span className="prop-domain" title={property.site_url}>{cleanUrl(property.site_url)}</span><SeoSummary siteUrl={property.site_url} /></a></td>
       <td className="num-cell"><a href={href} className="row-link">{formatNumber(property.impressions)}</a></td>
       <td className="num-cell"><a href={href} className="row-link">{formatNumber(property.clicks)}</a></td>
       <td className="num-cell"><a href={href} className="row-link">{formatCtr(property.ctr)}</a></td>
