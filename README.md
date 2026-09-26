@@ -101,7 +101,7 @@ cd frontend && pnpm build
 
 ## Deployment
 
-A Dockerfile and Kubernetes manifests are included in `etc/deploy/`.
+A Dockerfile is included in `etc/deploy/`.
 
 ```sh
 docker build -f etc/deploy/Dockerfile -t sitelytics .
@@ -111,11 +111,8 @@ docker run -p 19000:19000 \
   sitelytics
 ```
 
-The GitHub Actions `Release` workflow deploys `main` when manually dispatched.
-Configure the repository secrets `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`, and
-`DEPLOY_SSH_KEY` first. The SSH key must be authorized on the Kubernetes release
-host. The workflow builds and pushes a Linux amd64 image, then rolls out the
-Sitelytics app and SEO worker deployments in the `utils` namespace.
+The private `tgs-space/sitelytics` base repository owns the Kubernetes manifests
+and release workflow. It pins this public repository as a submodule.
 
 ## Project structure
 
@@ -152,7 +149,7 @@ backlink index. Audits crawl public same-site pages, respect robots.txt, and sho
 partial coverage when page limits or fetch failures leave pages unchecked.
 
 Run `cargo run -- seo-worker` alongside the API. Deploy the same image using
-`etc/deploy/seo-worker.yaml`. Configure `KAFKA_BROKERS`, `ADMIN_EMAILS`, and a random
+the private base repository's SEO worker manifest. Configure `KAFKA_BROKERS`, `ADMIN_EMAILS`, and a random
 `SEO_BROWSER_TOKEN` (at least 32 characters) in the existing secret. Provision
 one-partition topics `sitelytics.seo.browser.requests` and
 `sitelytics.seo.browser.responses`, each with seven-day retention. Follow
