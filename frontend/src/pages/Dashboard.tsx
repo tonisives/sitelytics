@@ -1,5 +1,6 @@
+import { PropertyColumnControls, PropertyColumnHeading, PropertyColumnsProvider, usePropertyColumns } from "../components/properties/PropertyColumns"
 import { SeoSummary, SeoSummaryProvider } from "../components/seo/SeoSummary"
-import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { type ReactNode, useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { Helmet } from "react-helmet-async"
 import type { DashboardData, GaPropertyData } from "../types"
@@ -123,7 +124,7 @@ export let Dashboard = () => {
   let aeoMentioned=Object.values(aeoMap).reduce((sum,row)=>sum+row.mentioned,0)
 
   return (
-    <div className="container">
+    <div className="container dashboard-container">
       <Helmet><title>Sitelytics</title></Helmet>
       <header className="dash-header">
         <h1>Sitelytics</h1>
@@ -161,37 +162,32 @@ export let Dashboard = () => {
         </div>
       </div>
 
-      <div className="table-header-row">
-        <h2>Properties ({data.properties.length})</h2>
-        <button
-          className={`toggle-btn${normalized ? " active" : ""}`}
-          onClick={() => setNormalized((n) => !n)}
-          title="Scale all sparklines to the same axis"
-        >Scale</button>
-      </div>
-      <SeoSummaryProvider><PropertyTable properties={data.properties} gaMap={gaMap} aeoMap={aeoMap} globalMax={globalMax} globalDates={globalDates} /></SeoSummaryProvider>
+      <PropertyColumnsProvider>
+        <div className="table-header-row">
+          <h2>Properties ({data.properties.length})</h2>
+          <div className="property-table-controls">
+            <PropertyColumnControls />
+            <button
+              className={`toggle-btn${normalized ? " active" : ""}`}
+              onClick={() => setNormalized((n) => !n)}
+              title="Scale all sparklines to the same axis"
+            >Scale</button>
+          </div>
+        </div>
+        <SeoSummaryProvider><PropertyTable properties={data.properties} gaMap={gaMap} aeoMap={aeoMap} globalMax={globalMax} globalDates={globalDates} /></SeoSummaryProvider>
+      </PropertyColumnsProvider>
     </div>
   )
 }
 
 type GlobalMax = { clicks: number; impressions: number; sessions: number }
 
-let PropertyTable = ({ properties, gaMap, aeoMap, globalMax, globalDates }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; aeoMap:Record<string,AeoDashboardRow>; globalMax?: GlobalMax; globalDates?: string[] }) => (
-  <div className="table-card property-table-card" role="region" aria-label="Domain list" tabIndex={0}>
+let PropertyTable = ({ properties, gaMap, aeoMap, globalMax, globalDates }: { properties: DashboardData["properties"]; gaMap: Record<string, GaPropertyData>; aeoMap:Record<string,AeoDashboardRow>; globalMax?: GlobalMax; globalDates?: string[] }) => {
+  let { visibleColumns } = usePropertyColumns()
+  return <div className="table-card property-table-card" role="region" aria-label="Domain list" tabIndex={0}>
     <table className="prop-table">
-      <thead>
-        <tr>
-          <th>Property</th>
-          <th className="num-cell">Impressions</th>
-          <th className="num-cell">Clicks</th>
-          <th className="num-cell">CTR</th>
-          <th className="num-cell">Position</th>
-          <th className="num-cell ga-col">Sessions</th>
-          <th className="num-cell">AI mentions</th>
-          <th className="sparkline-header">Clicks / Impressions</th>
-          <th className="sparkline-header ga-col">Sessions</th>
-        </tr>
-      </thead>
+      <colgroup>{visibleColumns.map(column => <col key={column.id} className={column.widthClass} />)}</colgroup>
+      <thead><tr>{visibleColumns.map(column => <PropertyColumnHeading key={column.id} id={column.id} />)}</tr></thead>
       <tbody>
         {properties.map((p) => (
           <PropertyRow key={p.site_url} property={p} gaData={gaMap[p.site_url]} aeoData={aeoMap[p.site_url]} globalMax={globalMax} globalDates={globalDates} />
@@ -199,9 +195,10 @@ let PropertyTable = ({ properties, gaMap, aeoMap, globalMax, globalDates }: { pr
       </tbody>
     </table>
   </div>
-)
+}
 
 let PropertyRow = ({ property, gaData, aeoData, globalMax, globalDates }: { property: DashboardData["properties"][0]; gaData?: GaPropertyData; aeoData?:AeoDashboardRow; globalMax?: GlobalMax; globalDates?: string[] }) => {
+  let { visibleColumns } = usePropertyColumns()
   let href = `/property/${encodeURIComponent(property.site_url)}`
 
   let overlayData = useMemo(() => {
@@ -224,46 +221,25 @@ let PropertyRow = ({ property, gaData, aeoData, globalMax, globalDates }: { prop
     return [...allDates].sort().map((d) => [d, byDate.get(d) ?? 0] as [string, number])
   }, [dates, gaData, globalDates])
 
-  return (
-    <tr className="prop-row-link">
-      <td className="prop-name"><a href={href} className="row-link"><span className="prop-domain" title={property.site_url}>{cleanUrl(property.site_url)}</span><SeoSummary siteUrl={property.site_url} /></a></td>
-      <td className="num-cell"><a href={href} className="row-link">{formatNumber(property.impressions)}</a></td>
-      <td className="num-cell"><a href={href} className="row-link">{formatNumber(property.clicks)}</a></td>
-      <td className="num-cell"><a href={href} className="row-link">{formatCtr(property.ctr)}</a></td>
-      <td className="num-cell"><a href={href} className="row-link">{formatPosition(property.position)}</a></td>
-      <td className="num-cell ga-col">
-        <a href={href} className="row-link color-teal">
-          {gaData ? formatNumber(gaData.total) : "-"}
-        </a>
-      </td>
-      <td className="aeo-pie-cell"><AeoPie data={aeoData} href={`${href}/seo/ai-visibility`} /></td>
-      <td className="sparkline-cell">
-        <OverlaySparklineTooltip
-          href={href}
-          colorA="var(--green)"
-          colorB="var(--accent)"
-          data={overlayData}
-          labelA="Clicks"
-          labelB="Impressions"
-          globalMaxA={globalMax?.clicks}
-          globalMaxB={globalMax?.impressions}
-        />
-      </td>
-      <td className="sparkline-cell">
-        {gaData && gaSparkData.length > 0 ? (
-          <SparklineTooltip
-            href={href}
-            color="var(--chart-teal)"
-            data={gaSparkData}
-            label="Sessions"
-            globalMax={globalMax?.sessions}
-          />
-        ) : (
-          <a href={href} className="row-link"><span /></a>
-        )}
-      </td>
-    </tr>
-  )
+  let cells: Record<typeof visibleColumns[number]["id"], ReactNode> = {
+    property: <a href={href} className="row-link"><span className="prop-domain" title={property.site_url}>{cleanUrl(property.site_url)}</span><SeoSummary siteUrl={property.site_url} /></a>,
+    impressions: <a href={href} className="row-link">{formatNumber(property.impressions)}</a>,
+    clicks: <a href={href} className="row-link">{formatNumber(property.clicks)}</a>,
+    ctr: <a href={href} className="row-link">{formatCtr(property.ctr)}</a>,
+    position: <a href={href} className="row-link">{formatPosition(property.position)}</a>,
+    sessions: <a href={href} className="row-link color-teal">{gaData ? formatNumber(gaData.total) : "-"}</a>,
+    ai: <AeoPie data={aeoData} href={`${href}/seo/ai-visibility`} />,
+    searchGraph: <OverlaySparklineTooltip
+      href={href} colorA="var(--green)" colorB="var(--accent)" data={overlayData}
+      labelA="Clicks" labelB="Impressions" globalMaxA={globalMax?.clicks} globalMaxB={globalMax?.impressions}
+    />,
+    sessionsGraph: gaData && gaSparkData.length > 0
+      ? <SparklineTooltip href={href} color="var(--chart-teal)" data={gaSparkData} label="Sessions" globalMax={globalMax?.sessions} />
+      : <a href={href} className="row-link">-</a>,
+  }
+  return <tr className="prop-row-link">
+    {visibleColumns.map(column => <td key={column.id} className={column.cellClass}>{cells[column.id]}</td>)}
+  </tr>
 }
 
 let AeoPie = ({data,href}:{data?:AeoDashboardRow;href:string}) => {

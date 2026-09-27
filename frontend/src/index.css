@@ -297,28 +297,25 @@ h2 {
   overflow-x: auto;
 }
 
-.property-table-card .prop-table {
-  min-width: 1000px;
-  table-layout: fixed;
-}
+.dashboard-container { max-width: 1600px; }
+.property-table-controls { display: flex; align-items: center; gap: 8px; }
 
-.property-table-card .prop-name {
-  width: 22%;
-  white-space: nowrap;
-}
+.property-table-card .prop-table { table-layout: fixed; }
+.property-column-name { width: 360px; }
+.property-column-search { width: 240px; }
+.property-column-sessions { width: 200px; }
+.property-column-metric { width: 110px; }
 
+.property-table-card .prop-name { white-space: normal; }
 .property-table-card .prop-domain,
 .property-table-card .prop-name small {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
-
-.property-table-card .sparkline-header,
-.property-table-card .sparkline-cell {
-  width: 15%;
-}
+.property-table-card .prop-name small { font-size: 12px; line-height: 1.5; }
+.property-table-card .sparkline-cell { width: auto; }
+.property-table-card .sparkline-tooltip-wrap { display: block; }
 
 .prop-table {
   width: 100%;

@@ -81,7 +81,7 @@ export let SparklineTooltip = ({
 
   return (
     <a href={href} className="row-link sparkline-tooltip-wrap" ref={containerRef}>
-      <ResponsiveContainer width={140} height={32}>
+      <ResponsiveContainer width="100%" minWidth={100} height={40}>
         <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
           <CartesianGrid horizontal vertical={false} stroke="var(--border)" strokeOpacity={0.4} />
           <YAxis
@@ -138,7 +138,7 @@ export let OverlaySparklineTooltip = ({
 
   return (
     <a href={href} className="row-link sparkline-tooltip-wrap" ref={containerRef}>
-      <ResponsiveContainer width={140} height={32}>
+      <ResponsiveContainer width="100%" minWidth={100} height={40}>
         <LineChart data={chartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
           <CartesianGrid horizontal vertical={false} stroke="var(--border)" strokeOpacity={0.4} />
           <YAxis
