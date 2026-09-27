@@ -15,3 +15,5 @@
 @media (max-width: 600px) {
   .panel { position: fixed; top: auto; bottom: 24px; left: 24px; right: 24px; width: auto; max-height: calc(100dvh - 48px); overflow-y: auto; }
 }
+
+.actions { display: flex; justify-content: space-between; gap: 8px; }

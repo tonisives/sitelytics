@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type DragEvent, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent, type DragEvent, type ReactNode } from "react"
 import styles from "./PropertyColumns.module.css"
 
 const STORAGE_KEY = "sitelytics.property-columns.v1"
@@ -71,17 +71,24 @@ export let usePropertyColumns = () => {
 
 export let PropertyColumnControls = () => {
   let { columns, resetColumns } = usePropertyColumns()
-  let handleEscape = (event: React.KeyboardEvent<HTMLDetailsElement>) => {
-    if (event.key !== "Escape") return
-    event.currentTarget.open = false
-    event.currentTarget.querySelector("summary")?.focus()
+  let detailsRef = useRef<HTMLDetailsElement>(null)
+  let handleClose = () => {
+    if (!detailsRef.current) return
+    detailsRef.current.open = false
+    detailsRef.current.querySelector("summary")?.focus()
   }
-  return <details className={styles.controls} onKeyDown={handleEscape}>
+  let handleEscape = (event: KeyboardEvent<HTMLDetailsElement>) => {
+    if (event.key === "Escape") handleClose()
+  }
+  return <details ref={detailsRef} className={styles.controls} onKeyDown={handleEscape}>
     <summary className="toggle-btn">Columns</summary>
     <div className={styles.panel}>
       <p>Show columns and choose their order. You can also drag table headings.</p>
       <ul>{columns.map(column => <ColumnControl key={column.id} id={column.id} />)}</ul>
-      <button type="button" className="toggle-btn" onClick={resetColumns}>Reset columns</button>
+      <div className={styles.actions}>
+        <button type="button" className="toggle-btn" onClick={resetColumns}>Reset columns</button>
+        <button type="button" className="toggle-btn" onClick={handleClose}>Done</button>
+      </div>
     </div>
   </details>
 }
