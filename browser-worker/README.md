@@ -15,6 +15,19 @@ active before every page request. It uses the shared scraper's browser pool,
 domain concurrency and pacing. Google may block automated requests, which
 produces partial coverage. The requested country and language are search hints.
 
+Keyword research runs remotely in the Rust worker using Google autocomplete and
+Search Console. Research topics are separate from tracked keywords. Rankings
+combine eight weeks of daily Search Console average positions with a separate
+remote Google result sample. A blocked result sample does not replace GSC ranks
+with positions from another search engine.
+
+Competitor research starts from the product context and checks each candidate
+website. Unavailable checks remain candidates for review. Link-specific searches
+are inspected before general discovery results, and observed links are separate
+from topical outreach ideas. Public-page research does not provide search volume,
+keyword difficulty, or a comprehensive backlink index. No paid SEO data provider
+is configured by this worker.
+
 Run `npm ci --ignore-scripts && npm test` in this directory.
 
 ## Portable bmux pilot

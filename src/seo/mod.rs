@@ -1,5 +1,6 @@
 pub mod api;
 pub mod crawl;
+pub mod discovery;
 pub mod google;
 pub mod worker;
 
@@ -19,6 +20,8 @@ pub struct Config {
     pub root_url: String,
     pub modules: BTreeMap<String, ModuleSettings>,
     pub keywords: Vec<String>,
+    #[serde(default)]
+    pub keyword_seeds: Vec<String>,
     pub competitors: Vec<String>,
     #[serde(default)]
     pub product_context: String,
@@ -41,6 +44,7 @@ impl Config {
                 .map(|m| (m.into(), ModuleSettings::default()))
                 .collect(),
             keywords: vec![],
+            keyword_seeds: vec![],
             competitors: vec![],
             product_context: String::new(),
             link_candidates: vec![],
@@ -78,6 +82,7 @@ impl Config {
         }
         for list in [
             &mut self.keywords,
+            &mut self.keyword_seeds,
             &mut self.competitors,
             &mut self.link_candidates,
             &mut self.render_urls,
@@ -91,15 +96,21 @@ impl Config {
             list.dedup();
         }
         if self.keywords.len() > 100
+            || self.keyword_seeds.len() > 10
             || self.competitors.len() > 10
             || self.link_candidates.len() > 25
             || self.render_urls.len() > 5
         {
             return Err(
-                "Limits: 100 keywords, 10 competitors, 25 candidate URLs, 5 rendered pages".into(),
+                "Limits: 100 tracked keywords, 10 research topics, 10 competitors, 25 candidate URLs, 5 rendered pages".into(),
             );
         }
-        if self.keywords.iter().any(|s| s.len() > 200) {
+        if self
+            .keywords
+            .iter()
+            .chain(&self.keyword_seeds)
+            .any(|s| s.len() > 200)
+        {
             return Err("Keywords must be at most 200 bytes".into());
         }
         self.product_context = self.product_context.trim().to_string();
@@ -143,16 +154,24 @@ impl Config {
 mod tests {
     use super::*;
     #[test]
-    fn settings_scope_and_defaults() {
+    fn settings_scope_and_defaults() -> Result<(), Box<dyn std::error::Error>> {
         let mut c = Config::initial("sc-domain:example.com");
         assert!(!c.enabled("audit"));
         assert!(c.validate("sc-domain:example.com").is_ok());
-        let mut legacy = serde_json::to_value(&c).unwrap();
-        legacy.as_object_mut().unwrap().remove("product_context");
+        let mut legacy = serde_json::to_value(&c)?;
+        legacy
+            .as_object_mut()
+            .ok_or("Expected config object")?
+            .remove("product_context");
+        legacy
+            .as_object_mut()
+            .ok_or("Expected config object")?
+            .remove("keyword_seeds");
         assert!(serde_json::from_value::<Config>(legacy).is_ok());
         c.root_url = "https://evil-example.com/".into();
         assert!(c.validate("sc-domain:example.com").is_err());
         c.root_url = "https://example.com/other/".into();
         assert!(c.validate("https://example.com/blog/").is_err());
+        Ok(())
     }
 }

@@ -8,11 +8,11 @@ export let matchedTerms = (context, value) => {
 }
 let focusTerms = context => contextTerms(context.split(/[,;.!?\n]/)[0]).slice(0, 5)
 let hasContext = (context, matches) => matches.length >= 2 && matches.some(word => focusTerms(context).includes(word))
-export let researchQueries = context => {
+export let researchQueries = (context, seeds = []) => {
  let clauses = context.trim().split(/[,;.!?\n]/).map(value => value.trim()).filter(Boolean)
  let focus = clauses[0]?.slice(0, 80) || context.slice(0, 80)
  let adjacent = (clauses[1] || focus).split(/\band\b/i)[0].trim().slice(0, 80)
- return [`${focus} software`, `${focus} tools`, `${adjacent} software`]
+ return [...new Set([`${focus} software`, `${focus} tools`, `${adjacent} software`, ...seeds.slice(0, 3)])]
 }
 let articlePath = /^\/(blog|blogs|article|articles|post|posts|news|guide|guides|review|reviews|resources)(\/|$)/i
 export let candidateInspectionUrl = candidate => {
@@ -59,7 +59,17 @@ export let topicalProspect = (page, context) => {
  if (!isCandidateHost(url.hostname, "")) return false
  let metadata = `${page.title || ""} ${page.description || ""} ${(page.h1 || []).join(" ")}`
  let matches = matchedTerms(context, metadata)
- let editorial = articlePath.test(url.pathname) || /\b(best|top|alternatives|directory|resources|tools|roundup|list of)\b/i.test(metadata)
+ let editorial = articlePath.test(url.pathname) || /\b(best|top \d+|alternatives|directory|resources|roundup|list of)\b/i.test(metadata)
  let external = (page.links || []).filter(link => { try { return new URL(link).hostname !== url.hostname } catch { return false } })
  return hasContext(context, matches) && editorial && external.length >= 2
+}
+export let prospectUrls = (config, snapshots, ownHost, competitors) => {
+ let linkResults = snapshots.filter(s => s.purpose === "link_discovery").flatMap(s => s.entries.map(e => e.url))
+ let topicalResults = snapshots.filter(s => s.purpose !== "link_discovery").flatMap(s => s.entries.map(e => e.url))
+ return [...new Set([...(config.link_candidates || []), ...linkResults, ...topicalResults])].filter(address => {
+  try {
+   let host = new URL(address).hostname.replace(/^www\./, "")
+   return isCandidateHost(host, ownHost) && !competitors.some(item => host === item.domain || host.endsWith(`.${item.domain}`))
+  } catch { return false }
+ }).slice(0, 25)
 }

@@ -114,8 +114,9 @@ pub async fn get_site(
         .fetch_all(&state.db)
         .await
         .map_err(db_error)?;
+    let schedules: Vec<Value> = sqlx::query_scalar("SELECT jsonb_build_object('module',module,'next_run_at',next_run_at) FROM seo_schedules WHERE site_id=$1").bind(id).fetch_all(&state.db).await.map_err(db_error)?;
     Ok(Json(
-        json!({"config":row.get::<Value,_>("config"),"jobs":jobs,"workers":health}),
+        json!({"config":row.get::<Value,_>("config"),"jobs":jobs,"workers":health,"schedules":schedules}),
     ))
 }
 pub async fn save_site(

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { extractDuckDuckGoLite, extractSerp, extractPage, rankResult } from "./extract.mjs"
-import { candidateInspectionUrl, competitorCandidates, researchQueries, topicalProspect, validateCompetitor } from "./research.mjs"
+import { candidateInspectionUrl, competitorCandidates, prospectUrls, researchQueries, topicalProspect, validateCompetitor } from "./research.mjs"
 let brokers = process.env.KAFKA_BROKERS?.split(",")
 let base = process.env.SITELYTICS_URL
 let token = process.env.SEO_BROWSER_TOKEN
@@ -92,6 +92,7 @@ let processJob = async (job, heartbeat) => {
  let root = await publicUrl(job.config.root_url)
  if (bmux) await bmux.begin(job, heartbeat)
  let result = { source: pilot ? "bmux pilot browser observation" : job.kind === "research" ? "remote search and shared Chrome observations" : "shared Chrome queue observation", collected_at: new Date().toISOString(), browser_context: { device: "desktop", requested_country: job.config.country, requested_language: job.config.language, location_precision: "Browser IP region; requested country is a hint, not verified geolocation" }, snapshots: [], pages: [], prospects: [], suggestions: [], errors: [] }
+ if (job.kind === "rankings") { result.serp_source = result.source; delete result.source }
  let navigate = async address => {
   if (!(await authorized(job.id))) throw new Error("Job cancelled")
   await heartbeat()
@@ -103,7 +104,7 @@ let processJob = async (job, heartbeat) => {
   let context = (job.config.product_context || "").trim()
   let knownCompetitors = (job.config.competitors || []).map(domain => domain.replace(/^www\./, ""))
   if (job.kind === "research") { result.research_version = 2; result.product_context = context; result.browser_context.search_engine = "DuckDuckGo Lite" }
-  let queries = job.kind === "rankings" ? job.config.keywords.slice(0, 100) : job.kind === "research" ? researchQueries(context) : []
+  let queries = job.kind === "rankings" ? job.config.keywords.slice(0, 100) : job.kind === "research" ? researchQueries(context, job.config.keyword_seeds) : []
   if (job.kind === "research" && !context) throw new Error("Set the product context in SEO settings before competitor research")
   for (let keyword of [...new Set(queries)]) {
    try {
@@ -135,7 +136,7 @@ let processJob = async (job, heartbeat) => {
      } catch { entry.unresolved = true; result.errors.push({ keyword, error: "Could not resolve a result destination" }) }
     }
     let rank = rankResult(snapshot, root.hostname)
-    result.snapshots.push({ keyword, ...snapshot, ...rank })
+    result.snapshots.push({ keyword, purpose: job.kind === "research" ? "competitor_discovery" : "rank_sample", ...snapshot, ...rank })
     result.suggestions.push(...snapshot.suggestions.map(text => ({ keyword: text, seed: keyword })))
     if (snapshot.blocked) { result.errors.push({ keyword, error: "Search engine blocked this request; research paused" }); break }
     if (rank.status === "unknown") result.errors.push({ keyword, error: "SERP layout could not be parsed" })
@@ -143,6 +144,7 @@ let processJob = async (job, heartbeat) => {
   }
   let discovered = job.kind === "research" ? competitorCandidates(result.snapshots, context, root.hostname, knownCompetitors) : []
   let confirmed = []
+  let unverified = []
   if (job.kind === "research") {
    for (let domain of knownCompetitors) if (!discovered.some(item => item.domain === domain)) discovered.push({ domain, appearances: 0, best_position: null, matched_terms: [], result_url: `https://${domain}/`, result_title: domain })
    for (let candidate of discovered.slice(0, 20)) {
@@ -151,24 +153,26 @@ let processJob = async (job, heartbeat) => {
      if (!inspectionUrl) continue
      let rendered = await navigate(inspectionUrl)
      let page = extractPage(rendered.html, rendered.url)
+     if (page.blocked) { unverified.push({ ...candidate, reason: "Website blocked the page check; relevance is based on search evidence", inspection_status: "blocked" }); continue }
      let verified = validateCompetitor(candidate, page, context, knownCompetitors)
      if (verified) confirmed.push(verified)
-    } catch (error) { result.errors.push({ url: candidate.result_url, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
+    } catch (error) { unverified.push({ ...candidate, reason: error.message, inspection_status: "unavailable" }); result.errors.push({ url: candidate.result_url, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
    }
-   for (let competitor of confirmed.slice(0, 3)) queries.push(`"${competitor.domain}" -site:${competitor.domain} resources`)
-   for (let keyword of [...new Set(queries)].slice(3)) {
+   let linkQueries = confirmed.slice(0, 5).map(competitor => `"${competitor.domain}" -site:${competitor.domain}`)
+   for (let keyword of [...new Set(linkQueries)]) {
     try {
      let snapshot = await searchResearch(job, keyword, heartbeat)
-     result.snapshots.push({ keyword, ...snapshot })
+     result.snapshots.push({ keyword, purpose: "link_discovery", ...snapshot })
      if (snapshot.blocked) { result.errors.push({ keyword, error: "Search engine blocked this request; link research paused" }); break }
     } catch (error) { result.errors.push({ keyword, error: error.message }); if (/cancelled|authorization|rate.limit|captcha|challenge|consent|blocked/i.test(error.message)) break }
    }
   }
-  let candidates = job.kind === "audit" ? job.config.render_urls.slice(0, 5) : job.kind === "research" ? [...new Set([...job.config.link_candidates, ...result.snapshots.flatMap(s => s.entries.map(e => e.url))])].filter(url => { try { let host = new URL(url).hostname; return host !== root.hostname && !confirmed.some(item => host === item.domain || host.endsWith(`.${item.domain}`)) } catch { return false } }).slice(0, 20) : []
+  let candidates = job.kind === "audit" ? job.config.render_urls.slice(0, 5) : job.kind === "research" ? prospectUrls(job.config, result.snapshots, root.hostname, confirmed) : []
   for (let address of candidates) {
    try {
     let rendered = await navigate(address)
     let page = extractPage(rendered.html, rendered.url)
+    if (page.blocked) throw new Error("Page blocked the remote browser check")
     await publicUrl(page.url)
     page.source = "Rendered DOM";page.collected_at = new Date().toISOString()
     result.pages.push(page)
@@ -179,9 +183,9 @@ let processJob = async (job, heartbeat) => {
     }
    } catch (error) { result.errors.push({ url: address, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
   }
-  if (job.kind === "research") result.competitors = confirmed
+  if (job.kind === "research") { result.competitors = confirmed; result.competitor_candidates = unverified; result.research_coverage = { searches: result.snapshots.length, product_candidates: discovered.length, confirmed_products: confirmed.length, unverified_products: unverified.length, inspected_link_pages: result.pages.length } }
   // Audit HTTP pages and issues remain the baseline; rendered observations are additional evidence.
-  let incomplete = result.errors.length > 0
+  let incomplete = result.errors.length > 0 || unverified.length > 0
   if (job.kind === "audit") { result.render_errors = result.errors; delete result.errors; result.rendered_pages = result.pages;delete result.pages;delete result.source;delete result.collected_at }
   if (await authorized(job.id)) await send({ id: job.id, status: incomplete ? "partial" : "succeeded", result })
   return incomplete ? "failed" : "succeeded"

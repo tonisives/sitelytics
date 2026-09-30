@@ -265,7 +265,7 @@ pub fn inspect(body: &str, url: &Url) -> Value {
     let titles = selected_text(&doc, "title");
     let descriptions = attributes(&doc, "meta[name='description']", "content");
     let headings = selected_text(&doc, "h1");
-    let links: Vec<String> = attributes(&doc, "a[href]", "href")
+    let mut links: Vec<String> = attributes(&doc, "a[href]", "href")
         .into_iter()
         .filter_map(|href| url.join(&href).ok())
         .filter(|u| matches!(u.scheme(), "http" | "https"))
@@ -276,6 +276,13 @@ pub fn inspect(body: &str, url: &Url) -> Value {
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
+    links.sort_by_key(|address| {
+        (
+            Url::parse(address).map_or(usize::MAX, |u| u.path().matches('/').count()),
+            address.len(),
+            address.clone(),
+        )
+    });
     let canonical = attributes(&doc, "link[rel~='canonical']", "href")
         .first()
         .and_then(|s| url.join(s).ok())
@@ -283,7 +290,10 @@ pub fn inspect(body: &str, url: &Url) -> Value {
     let robots = attributes(&doc, "meta[name='robots']", "content")
         .join(",")
         .to_lowercase();
-    json!({"url":url.as_str(),"title":titles.first().cloned().unwrap_or_default(),"description":descriptions.first().cloned().unwrap_or_default(),"h1":headings,"canonical":canonical,"noindex":robots.contains("noindex"),"links":links,"text_length":selected_text(&doc,"body").join(" ").len()})
+    let images_without_alt = Selector::parse("img:not([alt])")
+        .ok()
+        .map_or(0, |s| doc.select(&s).count());
+    json!({"url":url.as_str(),"title":titles.first().cloned().unwrap_or_default(),"description":descriptions.first().cloned().unwrap_or_default(),"h1":headings,"canonical":canonical,"noindex":robots.contains("noindex"),"links":links,"images_without_alt":images_without_alt,"has_viewport":!attributes(&doc,"meta[name='viewport']","content").is_empty(),"text_length":selected_text(&doc,"body").join(" ").len()})
 }
 pub async fn active(state: &AppState, id: Uuid) -> Result<bool, String> {
     sqlx::query_scalar("SELECT status IN ('running','waiting_browser') FROM seo_jobs WHERE id=$1")
@@ -293,7 +303,61 @@ pub async fn active(state: &AppState, id: Uuid) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 fn issue(issues: &mut Vec<Value>, url: &str, code: &str, detail: &str) {
-    issues.push(json!({"url":url,"code":code,"detail":detail}));
+    let (severity, action) = match code {
+        "http_error" | "fetch_failed" => (
+            "error",
+            "Restore this URL or remove links and sitemap entries that point to it.",
+        ),
+        "broken_internal_link" => (
+            "error",
+            "Update the link destination or restore the missing page.",
+        ),
+        "sitemap_noindex" => (
+            "error",
+            "Remove this page from the sitemap or remove noindex if it should appear in search.",
+        ),
+        "missing_title" | "duplicate_title" => (
+            "warning",
+            "Give each indexable page a distinct title that describes its content.",
+        ),
+        "missing_description" | "duplicate_description" | "long_description" => (
+            "warning",
+            "Write a concise, distinct description for this page.",
+        ),
+        "long_title" => (
+            "warning",
+            "Shorten the title while retaining the topic and useful identifying detail.",
+        ),
+        "heading_count" => (
+            "warning",
+            "Review the main heading so the page has a clear primary topic.",
+        ),
+        "missing_canonical" | "alternate_canonical" => (
+            "warning",
+            "Check the intended canonical URL and make sure internal links use it.",
+        ),
+        "missing_alt" => (
+            "warning",
+            "Add useful alt text to informative images and empty alt attributes to decorative images.",
+        ),
+        "missing_viewport" => (
+            "warning",
+            "Add a viewport meta tag and check the mobile layout.",
+        ),
+        "noindex" => (
+            "info",
+            "Confirm that excluding this page from search is intentional.",
+        ),
+        "redirect" => (
+            "info",
+            "Use the final destination in internal links and sitemap entries.",
+        ),
+        _ => (
+            "info",
+            "Check the rendered page and confirm that search engines can read its content.",
+        ),
+    };
+    issues.push(json!({"url":url,"code":code,"detail":detail,"severity":severity,"action":action}));
 }
 pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value, String> {
     let root = Url::parse(&config.root_url).map_err(|e| e.to_string())?;
@@ -308,6 +372,7 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
         ""
     });
     let mut queue = VecDeque::from([root.to_string()]);
+    queue.extend(config.render_urls.iter().cloned());
     let mut sitemap_urls = HashSet::new();
     let mut issues = vec![];
     let mut pages = vec![];
@@ -346,9 +411,6 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
                         }
                     } else if Url::parse(&address).is_ok_and(|u| in_scope(&root, &u)) {
                         sitemap_urls.insert(address.clone());
-                        if queue.len() < 5000 {
-                            queue.push_back(address);
-                        }
                     }
                 }
             }
@@ -359,10 +421,22 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
             _ => {}
         }
     }
-    while let Some(address) = queue.pop_front() {
-        if seen.len() >= config.page_limit || !active(state, id).await? {
+    let mut sitemap_seeds: Vec<String> = sitemap_urls.iter().cloned().collect();
+    sitemap_seeds.sort_by_key(|address| {
+        (
+            Url::parse(address).map_or(usize::MAX, |u| u.path().matches('/').count()),
+            address.len(),
+            address.clone(),
+        )
+    });
+    queue.extend(sitemap_seeds.into_iter().take(5000));
+    let mut queued: HashSet<String> = queue.iter().cloned().collect();
+    queue = queue.into_iter().filter(|s| queued.remove(s)).collect();
+    queued.extend(queue.iter().cloned());
+    while seen.len() < config.page_limit && active(state, id).await? {
+        let Some(address) = queue.pop_front() else {
             break;
-        }
+        };
         if !seen.insert(address.clone()) {
             continue;
         }
@@ -425,6 +499,47 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
                             &format!("Found {headings} H1 headings"),
                         );
                     }
+                    if info["title"]
+                        .as_str()
+                        .is_some_and(|s| s.chars().count() > 60)
+                    {
+                        issue(
+                            &mut issues,
+                            &address,
+                            "long_title",
+                            "Title exceeds 60 characters; review possible truncation",
+                        );
+                    }
+                    if info["description"]
+                        .as_str()
+                        .is_some_and(|s| s.chars().count() > 160)
+                    {
+                        issue(
+                            &mut issues,
+                            &address,
+                            "long_description",
+                            "Description exceeds 160 characters; review possible truncation",
+                        );
+                    }
+                    if info["images_without_alt"].as_u64().unwrap_or(0) > 0 {
+                        issue(
+                            &mut issues,
+                            &address,
+                            "missing_alt",
+                            &format!(
+                                "{} images have no alt attribute",
+                                info["images_without_alt"]
+                            ),
+                        );
+                    }
+                    if info["has_viewport"] == false {
+                        issue(
+                            &mut issues,
+                            &address,
+                            "missing_viewport",
+                            "Missing mobile viewport meta tag",
+                        );
+                    }
                     if page.robots.contains("noindex") {
                         info["noindex"] = json!(true);
                     }
@@ -465,13 +580,14 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
                         );
                     }
                     if let Some(links) = info["links"].as_array() {
-                        for link in links.iter().filter_map(Value::as_str) {
+                        for link in links.iter().rev().filter_map(Value::as_str) {
                             if queue.len() < 5000
                                 && Url::parse(link)
                                     .is_ok_and(|u| in_scope(&root, &u) && u.query().is_none())
                                 && !seen.contains(link)
+                                && queued.insert(link.into())
                             {
-                                queue.push_back(link.into());
+                                queue.push_front(link.into());
                             }
                         }
                     }
@@ -558,7 +674,7 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
 mod tests {
     use super::*;
     #[test]
-    fn ssrf_addresses() {
+    fn ssrf_addresses() -> Result<(), std::net::AddrParseError> {
         for address in [
             "127.0.0.1",
             "10.0.0.1",
@@ -568,27 +684,30 @@ mod tests {
             "::ffff:127.0.0.1",
             "2001:db8::1",
         ] {
-            assert!(!public_ip(address.parse().expect("ip")));
+            assert!(!public_ip(address.parse()?));
         }
-        assert!(public_ip("8.8.8.8".parse().expect("ip")));
+        assert!(public_ip("8.8.8.8".parse()?));
+        Ok(())
     }
     #[test]
-    fn robots_specificity() {
+    fn robots_specificity() -> Result<(), Box<dyn std::error::Error>> {
         let r = Robots::parse(
             "User-agent: *\nDisallow: /private\nAllow: /private/public\nDisallow: /*?*\n",
         );
-        assert!(!r.allows(&Url::parse("https://example.com/private/x").expect("url")));
-        assert!(r.allows(&Url::parse("https://example.com/private/public").expect("url")));
-        assert!(!r.allows(&Url::parse("https://example.com/a?x=1").expect("url")));
+        assert!(!r.allows(&Url::parse("https://example.com/private/x")?));
+        assert!(r.allows(&Url::parse("https://example.com/private/public")?));
+        assert!(!r.allows(&Url::parse("https://example.com/a?x=1")?));
+        Ok(())
     }
     #[test]
-    fn html_signals() {
+    fn html_signals() -> Result<(), Box<dyn std::error::Error>> {
         let v = inspect(
             "<title>A</title><meta name='robots' content='noindex'><h1>Hi</h1><a href='/missing#x'>Link</a>",
-            &Url::parse("https://example.com/").expect("url"),
+            &Url::parse("https://example.com/")?,
         );
         assert_eq!(v["title"], "A");
         assert_eq!(v["noindex"], true);
         assert_eq!(v["links"][0], "https://example.com/missing");
+        Ok(())
     }
 }

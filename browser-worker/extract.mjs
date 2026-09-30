@@ -67,6 +67,7 @@ export let extractPage = (html, pageUrl) => {
  let $ = load(html), body = $("body").text()
  return {
   url: pageUrl, title: $("title").first().text(), description: $("meta[name='description']").attr("content") || "",
+  blocked: /vercel security checkpoint|^just a moment|^access denied|^attention required/i.test($("title").first().text()) || /verify you are (a )?human|checking your browser before accessing/i.test(body.slice(0, 2000)),
   h1: $("h1").toArray().map(h => $(h).text().trim()),
   canonical: absolute($("link[rel~='canonical']").attr("href"), pageUrl),
   noindex: /noindex/i.test($("meta[name='robots']").attr("content") || ""),

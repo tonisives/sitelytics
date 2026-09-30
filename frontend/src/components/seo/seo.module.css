@@ -40,3 +40,15 @@
 .empty { padding: 24px 0; }
 .workspace summary { cursor: pointer; padding: 12px 0; }
 .summary { display: block; font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.overview { margin: 24px 0; display: grid; gap: 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.card { display: grid; gap: 8px; padding: 16px; background: var(--surface); border: 1px solid var(--border); color: var(--text); text-decoration: none; }
+.card:hover { background: var(--surface-hover); }
+.card span { font-size: 13px; }
+.card small { color: var(--text-muted); font-size: 11px; }
+.researchForm { display: grid; gap: 12px; padding: 18px; background: var(--surface); border: 1px solid var(--border); max-width: 850px; }
+.researchForm button { justify-self: start; }
+.researchForm p { margin: 0; }
+.issueGroup { border: 1px solid var(--border); background: var(--surface); padding: 0 16px 12px; }
+.issueGroup summary { display: flex; gap: 12px; justify-content: space-between; align-items: center; text-transform: capitalize; }
+.issueGroup summary span { color: var(--text-muted); font-size: 12px; white-space: nowrap; }

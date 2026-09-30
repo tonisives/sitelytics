@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { extractBingSerp, extractDuckDuckGoLite, extractPage, extractSerp, rankResult } from "./extract.mjs"
-import { candidateInspectionUrl, competitorCandidates, topicalProspect, validateCompetitor } from "./research.mjs"
+import { candidateInspectionUrl, competitorCandidates, prospectUrls, topicalProspect, validateCompetitor } from "./research.mjs"
 test("unknown is distinct from not observed", () => {
  assert.equal(rankResult({ entries: [] }, "example.com").status, "unknown")
  assert.equal(rankResult({ entries: [], blocked: true }, "example.com").status, "blocked")
@@ -59,4 +59,16 @@ test("topical outreach ideas require relevant editorial pages with external link
  assert.equal(topicalProspect({ ...page, url: "https://publisher.example/" }, "Business idea discovery, startup opportunity research"), true)
  assert.equal(topicalProspect({ ...page, title: "Stock chart tools", description: "Technical analysis", url: "https://publisher.example/blog/stocks" }, "Business idea discovery, startup opportunity research"), false)
  assert.equal(topicalProspect({ ...page, url: "https://github.com/project" }, "Business idea discovery, startup opportunity research"), false)
+})
+test("competitor-link searches are inspected before broad discovery results", () => {
+ let discovery = { purpose: "competitor_discovery", entries: Array.from({ length: 30 }, (_,i) => ({url:`https://publisher.example/article/${i}`})) }
+ let links = { purpose: "link_discovery", entries: [{url:"https://directory.example/competitor"},{url:"https://www.owned.example/"},{url:"https://competitor.example/"}] }
+ let urls = prospectUrls({link_candidates:[]}, [discovery,links], "owned.example", [{domain:"competitor.example"}])
+ assert.equal(urls[0], "https://directory.example/competitor")
+ assert.equal(urls.length, 25)
+ assert(!urls.includes("https://www.owned.example/"))
+ assert(!urls.includes("https://competitor.example/"))
+})
+test("challenge pages are not treated as product evidence", () => {
+ assert.equal(extractPage('<html><title>Vercel Security Checkpoint</title><body>Checking your browser</body></html>', "https://ideas.example/").blocked, true)
 })

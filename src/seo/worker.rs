@@ -1,4 +1,4 @@
-use super::{Config, crawl, google};
+use super::{Config, crawl, discovery, google};
 use crate::state::AppState;
 use chrono::Utc;
 use rdkafka::{
@@ -133,14 +133,29 @@ async fn work_locked(state: &AppState, producer: &FutureProducer) -> Result<(), 
         .map_err(|e| e.to_string())?;
     let result = match module.as_str() {
         "keywords" => {
-            google::keywords(
+            discovery::report(
                 state,
                 id,
                 site.get("user_id"),
                 &site.get::<String, _>("site_url"),
+                &config,
             )
             .await
         }
+        "rankings" => match google::rankings(
+            state,
+            id,
+            site.get("user_id"),
+            &site.get::<String, _>("site_url"),
+            &config.keywords,
+        )
+        .await
+        {
+            Ok(result) => Ok(result),
+            Err(error) => Ok(
+                json!({"source":"Rank tracking","tracked":[],"history":[],"history_errors":[{"error":error}],"complete":false}),
+            ),
+        },
         "audit" => crawl::audit(state, id, &config).await,
         _ => Ok(json!({})),
     };
