@@ -33,6 +33,8 @@
 .competitorList h4, .competitorList p { margin: 0 0 6px; }
 .competitorList small { color: var(--text-muted); }
 .compactTable td { padding-top: 8px; padding-bottom: 8px; vertical-align: middle; }
+.compactTable td:not(:first-child) { white-space: nowrap; }
+.compactTable details[open] { white-space: normal; }
 .compactTable td:first-child { width: 55%; max-width: 360px; }
 .compactTable td:first-child a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compactTable td p { max-width: 520px; overflow-wrap: anywhere; }
