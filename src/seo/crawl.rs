@@ -589,7 +589,17 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
                                 && !seen.contains(link)
                                 && queued.insert(link.into())
                             {
-                                queue.push_back(link.into());
+                                let shallow = Url::parse(link).is_ok_and(|url| {
+                                    let depth = |path: &str| {
+                                        path.split('/').filter(|part| !part.is_empty()).count()
+                                    };
+                                    depth(url.path()) <= depth(root.path()) + 1
+                                });
+                                if shallow {
+                                    queue.push_front(link.into());
+                                } else {
+                                    queue.push_back(link.into());
+                                }
                             }
                         }
                     }
