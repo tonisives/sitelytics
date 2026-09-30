@@ -27,6 +27,11 @@ are inspected before general discovery results, and observed links are separate
 from topical outreach ideas. When shared Chrome returns truncated HTML, research
 tries a bounded public HTTP fetch from k3s and validates every redirect. Its
 observations retain the HTTP source. Blocked pages remain incomplete checks.
+Verified link observations from matching product context are retained for up to
+30 days with their original check dates. A partial search does not replace those
+observations with an empty report. Technical crawls publish progress every ten
+pages, so collected findings are visible before the run finishes.
+
 Public-page research does not provide search volume,
 keyword difficulty, or a comprehensive backlink index. No paid SEO data provider
 is configured by this worker.

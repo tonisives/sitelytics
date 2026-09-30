@@ -597,6 +597,15 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
                 pages.push(info);
             }
         }
+        if seen.len() % 10 == 0 {
+            let progress = json!({"source":"Sitelytics HTTP crawl","collected_at":chrono::Utc::now(),"root_url":root.as_str(),"pages":pages,"issues":issues,"issue_count":issues.len(),"errors":errors,"complete":false,"coverage":{"visited":seen.len(),"page_limit":config.page_limit,"remaining":queue.len(),"sitemap_urls":sitemap_urls.len()}});
+            sqlx::query("UPDATE seo_jobs SET result=$2 WHERE id=$1 AND status='running'")
+                .bind(id)
+                .bind(progress)
+                .execute(&state.db)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
     }
     for key in ["title", "description"] {
         let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();

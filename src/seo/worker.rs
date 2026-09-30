@@ -227,6 +227,97 @@ async fn ingest(state: &AppState, payload: &[u8]) -> Result<(), String> {
         .as_str()
         .filter(|s| ["succeeded", "partial", "failed"].contains(s))
         .unwrap_or("failed");
-    sqlx::query("UPDATE seo_jobs SET status=CASE WHEN result->>'complete'='false' AND $2='succeeded' THEN 'partial' ELSE $2 END,result=COALESCE(result,'{}'::jsonb)||$3,error=$4,completed_at=now() WHERE id=$1 AND status='waiting_browser'").bind(id).bind(status).bind(&value["result"]).bind(value["error"].as_str()).execute(&state.db).await.map_err(|e|e.to_string())?;
+    let mut result = value["result"].clone();
+    if result["research_version"] == 2 {
+        let previous: Vec<Value> = sqlx::query_scalar("SELECT result FROM seo_jobs WHERE site_id=(SELECT site_id FROM seo_jobs WHERE id=$1 AND module='research') AND id<>$1 AND module='research' AND status IN ('succeeded','partial') AND completed_at>now()-interval '30 days' ORDER BY completed_at DESC LIMIT 12").bind(id).fetch_all(&state.db).await.map_err(|e|e.to_string())?;
+        retain_observed_links(&mut result, &previous);
+    }
+    sqlx::query("UPDATE seo_jobs SET status=CASE WHEN result->>'complete'='false' AND $2='succeeded' THEN 'partial' ELSE $2 END,result=COALESCE(result,'{}'::jsonb)||$3,error=$4,completed_at=now() WHERE id=$1 AND status='waiting_browser'").bind(id).bind(status).bind(&result).bind(value["error"].as_str()).execute(&state.db).await.map_err(|e|e.to_string())?;
     Ok(())
+}
+
+fn retain_observed_links(current: &mut Value, previous: &[Value]) {
+    let context = current["product_context"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let mut prospects = current["prospects"].as_array().cloned().unwrap_or_default();
+    for row in &mut prospects {
+        if row["observed_at"].is_null() {
+            row["observed_at"] = current["collected_at"].clone();
+        }
+    }
+    let mut seen: std::collections::HashSet<String> = prospects
+        .iter()
+        .filter_map(|row| row["url"].as_str().map(str::to_string))
+        .collect();
+    let cutoff = Utc::now() - chrono::Duration::days(30);
+    let mut retained = 0;
+    if !context.is_empty() {
+        for report in previous {
+            if report["research_version"] != 2
+                || !report["product_context"]
+                    .as_str()
+                    .is_some_and(|s| s.trim().eq_ignore_ascii_case(&context))
+            {
+                continue;
+            }
+            for row in report["prospects"].as_array().into_iter().flatten() {
+                if prospects.len() >= 75 {
+                    break;
+                }
+                if !matches!(
+                    row["status"].as_str(),
+                    Some("observed link" | "earlier link")
+                ) {
+                    continue;
+                }
+                let Some(url) = row["url"].as_str() else {
+                    continue;
+                };
+                let observed = row
+                    .get("observed_at")
+                    .filter(|v| !v.is_null())
+                    .unwrap_or(&report["collected_at"]);
+                if !observed
+                    .as_str()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .is_some_and(|date| date.with_timezone(&Utc) >= cutoff)
+                    || !seen.insert(url.to_string())
+                {
+                    continue;
+                }
+                let mut earlier = row.clone();
+                earlier["status"] = json!("earlier link");
+                earlier["observed_at"] = observed.clone();
+                prospects.push(earlier);
+                retained += 1;
+            }
+        }
+    }
+    current["prospects"] = json!(prospects);
+    current["retained_link_observations"] = json!(retained);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn incomplete_research_retains_only_contextual_verified_links_with_original_dates() {
+        let checked = (Utc::now() - chrono::Duration::days(3)).to_rfc3339();
+        let mut current = json!({"research_version":2,"product_context":"Business idea discovery","collected_at":Utc::now(),"prospects":[{"url":"https://fresh.example/","status":"observed link"}]});
+        let previous = vec![
+            json!({"research_version":2,"product_context":"Business idea discovery","collected_at":checked,"prospects":[{"url":"https://earlier.example/","status":"observed link"},{"url":"https://fresh.example/","status":"observed link"},{"url":"https://unverified.example/","status":"topical outreach idea"}]}),
+            json!({"research_version":2,"product_context":"Stock price analysis","collected_at":checked,"prospects":[{"url":"https://stocks.example/","status":"observed link"}]}),
+        ];
+        retain_observed_links(&mut current, &previous);
+        assert_eq!(current["prospects"].as_array().map(Vec::len), Some(2));
+        assert_eq!(current["prospects"][1]["status"], "earlier link");
+        assert_eq!(current["prospects"][1]["observed_at"], checked);
+        assert_eq!(current["retained_link_observations"], 1);
+        let older = json!({"research_version":2,"product_context":"Business idea discovery","collected_at":Utc::now(),"prospects":[{"url":"https://expired.example/","status":"earlier link","observed_at":(Utc::now()-chrono::Duration::days(31)).to_rfc3339()}]});
+        retain_observed_links(&mut current, &[older]);
+        assert_eq!(current["prospects"].as_array().map(Vec::len), Some(2));
+    }
 }

@@ -109,7 +109,7 @@ pub async fn get_site(
         ));
     };
     let id: Uuid = row.get("id");
-    let jobs:Vec<Value>=sqlx::query_scalar("SELECT to_jsonb(j) - 'config' FROM (SELECT id,module,status,CASE WHEN (status='waiting_browser' AND result ? 'source') OR id IN (SELECT DISTINCT ON (module) id FROM seo_jobs WHERE site_id=$1 AND status IN ('succeeded','partial') ORDER BY module,created_at DESC) THEN result ELSE NULL END AS result,error,created_at,started_at,completed_at FROM seo_jobs WHERE site_id=$1 ORDER BY created_at DESC LIMIT 80) j").bind(id).fetch_all(&state.db).await.map_err(db_error)?;
+    let jobs:Vec<Value>=sqlx::query_scalar("SELECT to_jsonb(j) - 'config' FROM (SELECT id,module,status,CASE WHEN (status IN ('running','waiting_browser') AND result ? 'source') OR id IN (SELECT DISTINCT ON (module) id FROM seo_jobs WHERE site_id=$1 AND status IN ('succeeded','partial') ORDER BY module,created_at DESC) THEN result ELSE NULL END AS result,error,created_at,started_at,completed_at FROM seo_jobs WHERE site_id=$1 ORDER BY created_at DESC LIMIT 80) j").bind(id).fetch_all(&state.db).await.map_err(db_error)?;
     let health: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(h) || jsonb_build_object('backlog',(SELECT count(*) FROM seo_jobs WHERE status IN ('queued','running','waiting_browser')),'oldest_pending',(SELECT min(created_at) FROM seo_jobs WHERE status IN ('queued','running','waiting_browser')),'last_success',(SELECT max(completed_at) FROM seo_jobs WHERE status='succeeded'),'failures_24h',(SELECT count(*) FROM seo_jobs WHERE status='failed' AND completed_at>now()-interval '24 hours')) FROM seo_worker_health h")
         .fetch_all(&state.db)
         .await
