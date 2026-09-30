@@ -1,3 +1,4 @@
+import { fetchPublicHtml } from "./http.mjs"
 import { createBmuxBrowser } from "./bmux.mjs"
 import { Kafka, logLevel } from "kafkajs"
 import { randomUUID } from "node:crypto"
@@ -98,7 +99,10 @@ let processJob = async (job, heartbeat) => {
   await heartbeat()
   let url = await publicUrl(address)
   if (url.hostname === "www.google.com") { await sleep(Math.max(0, 10000 - (Date.now() - lastGoogle))); lastGoogle = Date.now() }
-  return scrape(job, url)
+  try { return await scrape(job, url) } catch (error) {
+   if (job.kind !== "research" || bmux || !/incomplete HTML/.test(error.message)) throw error
+   return fetchPublicHtml(url, publicUrl)
+  }
  }
  {
   let context = (job.config.product_context || "").trim()
@@ -174,12 +178,12 @@ let processJob = async (job, heartbeat) => {
     let page = extractPage(rendered.html, rendered.url)
     if (page.blocked) throw new Error("Page blocked the remote browser check")
     await publicUrl(page.url)
-    page.source = "Rendered DOM";page.collected_at = new Date().toISOString()
+    page.source = rendered.source || "Rendered DOM";page.collected_at = new Date().toISOString()
     result.pages.push(page)
     if (job.kind === "research") {
      let matches = domain => page.links.filter(link => { try { let host = new URL(link).hostname; return host === domain || host.endsWith(`.${domain}`) } catch { return false } })
      let owned = matches(root.hostname), linkedCompetitors = confirmed.flatMap(item => matches(item.domain))
-     if (owned.length || linkedCompetitors.length || topicalProspect(page, context)) result.prospects.push({ url: page.url, title: page.title, owned_links: owned, competitor_links: linkedCompetitors, status: owned.length || linkedCompetitors.length ? "observed link" : "topical outreach idea", evidence: page.excerpt.slice(0, 500) })
+     if (owned.length || linkedCompetitors.length || topicalProspect(page, context)) result.prospects.push({ url: page.url, title: page.title, owned_links: owned, competitor_links: linkedCompetitors, status: owned.length || linkedCompetitors.length ? "observed link" : "topical outreach idea", source: page.source, evidence: page.excerpt.slice(0, 500) })
     }
    } catch (error) { result.errors.push({ url: address, error: error.message }); if (/cancelled|authorization/.test(error.message)) break }
   }

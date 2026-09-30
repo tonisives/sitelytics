@@ -4,7 +4,7 @@ USER root
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
-COPY worker.mjs extract.mjs research.mjs bmux.mjs supervise.mjs ./
+COPY worker.mjs extract.mjs research.mjs http.mjs bmux.mjs supervise.mjs ./
 ENV SEO_BROWSER_BACKEND=bmux
 USER node
 ENTRYPOINT ["tini", "--", "node", "supervise.mjs"]

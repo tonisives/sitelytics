@@ -1,3 +1,4 @@
+import { fetchPublicHtml } from "./http.mjs"
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { extractBingSerp, extractDuckDuckGoLite, extractPage, extractSerp, rankResult } from "./extract.mjs"
@@ -71,4 +72,25 @@ test("competitor-link searches are inspected before broad discovery results", ()
 })
 test("challenge pages are not treated as product evidence", () => {
  assert.equal(extractPage('<html><title>Vercel Security Checkpoint</title><body>Checking your browser</body></html>', "https://ideas.example/").blocked, true)
+})
+
+test("public HTML fallback validates redirects and refuses private destinations", async () => {
+ let checked = []
+ let validate = async address => { let url = new URL(address); checked.push(url.href); if (url.hostname === "127.0.0.1") throw new Error("Non-public destination"); return url }
+ let fetchPage = async () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1/private" } })
+ await assert.rejects(fetchPublicHtml("https://public.example/", validate, { fetchPage }), /Non-public destination/)
+ assert.deepEqual(checked, ["https://public.example/", "http://127.0.0.1/private"])
+})
+test("public HTML fallback preserves source and bounds the streamed body", async () => {
+ let validate = async address => new URL(address)
+ let fetchPage = async () => new Response("<title>Article</title>", { headers: { "content-type": "text/html" } })
+ let page = await fetchPublicHtml("https://public.example/", validate, { fetchPage })
+ assert.equal(page.source, "Remote HTTP HTML")
+ assert.equal(extractPage(page.html, page.url).title, "Article")
+ await assert.rejects(fetchPublicHtml("https://public.example/", validate, { fetchPage, limit: 5 }), /size limit/)
+})
+test("page evidence excludes scripts and product-feedback articles are not startup idea prospects", () => {
+ let page = extractPage('<title>15 Best Product Discovery Tools</title><meta name="description" content="Market discovery and business feedback"><body><script>find startup ideas</script><main><p>Actual article</p><a href="https://a.example/">A</a><a href="https://b.example/">B</a></main></body>', "https://publisher.example/blog/tools")
+ assert.equal(page.excerpt, "Actual articleAB")
+ assert.equal(topicalProspect(page, "Business idea discovery, early market signals for founders"), false)
 })

@@ -14,6 +14,8 @@ export let researchQueries = (context, seeds = []) => {
  let adjacent = (clauses[1] || focus).split(/\band\b/i)[0].trim().slice(0, 80)
  return [...new Set([`${focus} software`, `${focus} tools`, `${adjacent} software`, ...seeds.slice(0, 3)])]
 }
+let ideaDiscoveryContext = context => /\b(discovery|discover|finding|find|generation|generate|spotting|spot)\b/i.test(context.split(/[,;.!?\n]/)[0]) && /\b(idea|opportunity|signal)\b/i.test(context)
+let hasIdeaTopic = metadata => /\b(ideas?|startup|entrepreneurs?)\b|\bbusiness.{0,30}opportunit/i.test(metadata)
 let articlePath = /^\/(blog|blogs|article|articles|post|posts|news|guide|guides|review|reviews|resources)(\/|$)/i
 export let candidateInspectionUrl = candidate => {
  if (candidate.domain.startsWith("blog.")) return null
@@ -47,7 +49,7 @@ export let validateCompetitor = (candidate, page, context, known = []) => {
  let metadata = `${page.title || ""} ${page.description || ""} ${(page.h1 || []).join(" ")}`
  let matches = matchedTerms(context, metadata)
  let offersProduct = /\b(software|platform|tools?|apps?|suite|product|workspace|services?)\b/i.test(metadata) || /\b(sign up|get started|start free|try free)\b/i.test((page.excerpt || "").slice(0, 1000))
- let discoveryContext = /\b(discovery|discover|finding|find|generation|generate|spotting|spot)\b/i.test(context.split(/[,;.!?\n]/)[0]) && /\b(idea|opportunity|signal)\b/i.test(context)
+ let discoveryContext = ideaDiscoveryContext(context)
  let discoversIdeas = /\b(discover|discovery|find|finding|generate|generator|browse|explore|curat\w*|spot|uncover)\b/i.test(metadata) && /\b(ideas?|opportunit\w*|signals?)\b/i.test(metadata)
  if (discoveryContext && !discoversIdeas && !known.includes(candidate.domain)) return null
  if ((!hasContext(context, matches) || !offersProduct) && !known.includes(candidate.domain)) return null
@@ -61,7 +63,7 @@ export let topicalProspect = (page, context) => {
  let matches = matchedTerms(context, metadata)
  let editorial = articlePath.test(url.pathname) || /\b(best|top \d+|alternatives|directory|resources|roundup|list of)\b/i.test(metadata)
  let external = (page.links || []).filter(link => { try { return new URL(link).hostname !== url.hostname } catch { return false } })
- return hasContext(context, matches) && editorial && external.length >= 2
+ return hasContext(context, matches) && (!ideaDiscoveryContext(context) || hasIdeaTopic(metadata)) && editorial && external.length >= 2
 }
 export let prospectUrls = (config, snapshots, ownHost, competitors) => {
  let linkResults = snapshots.filter(s => s.purpose === "link_discovery").flatMap(s => s.entries.map(e => e.url))

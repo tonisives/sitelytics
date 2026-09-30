@@ -64,7 +64,9 @@ export let extractDuckDuckGoLite = (html, pageUrl) => {
 }
 
 export let extractPage = (html, pageUrl) => {
- let $ = load(html), body = $("body").text()
+ let $ = load(html)
+ $("script,style,noscript,template").remove()
+ let body = $("body").text(), content = $("main,article").first().text() || body
  return {
   url: pageUrl, title: $("title").first().text(), description: $("meta[name='description']").attr("content") || "",
   blocked: /vercel security checkpoint|^just a moment|^access denied|^attention required/i.test($("title").first().text()) || /verify you are (a )?human|checking your browser before accessing/i.test(body.slice(0, 2000)),
@@ -72,7 +74,7 @@ export let extractPage = (html, pageUrl) => {
   canonical: absolute($("link[rel~='canonical']").attr("href"), pageUrl),
   noindex: /noindex/i.test($("meta[name='robots']").attr("content") || ""),
   links: [...new Set($("a[href]").toArray().map(a => absolute($(a).attr("href"), pageUrl)).filter(h => h && /^https?:\/\//.test(h)))].slice(0, 500),
-  text_length: body.length, excerpt: body.trim().slice(0, 3000)
+  text_length: body.length, excerpt: content.replace(/\s+/g, " ").trim().slice(0, 3000)
  }
 }
 

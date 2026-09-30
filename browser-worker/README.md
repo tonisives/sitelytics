@@ -24,7 +24,10 @@ with positions from another search engine.
 Competitor research starts from the product context and checks each candidate
 website. Unavailable checks remain candidates for review. Link-specific searches
 are inspected before general discovery results, and observed links are separate
-from topical outreach ideas. Public-page research does not provide search volume,
+from topical outreach ideas. When shared Chrome returns truncated HTML, research
+tries a bounded public HTTP fetch from k3s and validates every redirect. Its
+observations retain the HTTP source. Blocked pages remain incomplete checks.
+Public-page research does not provide search volume,
 keyword difficulty, or a comprehensive backlink index. No paid SEO data provider
 is configured by this worker.
 

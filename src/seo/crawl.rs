@@ -268,7 +268,9 @@ pub fn inspect(body: &str, url: &Url) -> Value {
     let mut links: Vec<String> = attributes(&doc, "a[href]", "href")
         .into_iter()
         .filter_map(|href| url.join(&href).ok())
-        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .filter(|u| {
+            matches!(u.scheme(), "http" | "https") && u.path() != "/cdn-cgi/l/email-protection"
+        })
         .map(|mut u| {
             u.set_fragment(None);
             u.to_string()
@@ -580,14 +582,14 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
                         );
                     }
                     if let Some(links) = info["links"].as_array() {
-                        for link in links.iter().rev().filter_map(Value::as_str) {
+                        for link in links.iter().filter_map(Value::as_str) {
                             if queue.len() < 5000
                                 && Url::parse(link)
                                     .is_ok_and(|u| in_scope(&root, &u) && u.query().is_none())
                                 && !seen.contains(link)
                                 && queued.insert(link.into())
                             {
-                                queue.push_front(link.into());
+                                queue.push_back(link.into());
                             }
                         }
                     }
@@ -598,7 +600,10 @@ pub async fn audit(state: &AppState, id: Uuid, config: &Config) -> Result<Value,
     }
     for key in ["title", "description"] {
         let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for page in &pages {
+        for page in pages
+            .iter()
+            .filter(|page| page["noindex"] != true && page["status"] == 200)
+        {
             if let Some(v) = page[key].as_str().filter(|s| !s.is_empty()) {
                 grouped
                     .entry(v.into())
@@ -702,12 +707,12 @@ mod tests {
     #[test]
     fn html_signals() -> Result<(), Box<dyn std::error::Error>> {
         let v = inspect(
-            "<title>A</title><meta name='robots' content='noindex'><h1>Hi</h1><a href='/missing#x'>Link</a>",
+            "<title>A</title><meta name='robots' content='noindex'><h1>Hi</h1><a href='/missing#x'>Link</a><a href='/cdn-cgi/l/email-protection#123' data-cfemail='123'>Email</a>",
             &Url::parse("https://example.com/")?,
         );
         assert_eq!(v["title"], "A");
         assert_eq!(v["noindex"], true);
-        assert_eq!(v["links"][0], "https://example.com/missing");
+        assert_eq!(v["links"], json!(["https://example.com/missing"]));
         Ok(())
     }
 }
