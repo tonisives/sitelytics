@@ -11,7 +11,7 @@ export let SeoSummary = ({ siteUrl }: { siteUrl: string }) => {
  let summary = useContext(SummaryContext)[siteUrl]
  if (!summary || !Object.values(summary.enabled).some(module => module.enabled)) return null
  let details = `${summary.enabled.audit.enabled ? `${summary.issues ?? "—"} audit findings · ` : ""}${summary.enabled.rankings.enabled ? `${summary.keywords} tracked keywords · ` : ""}${summary.last_success ? `Updated ${new Date(summary.last_success).toLocaleDateString()}` : "Awaiting first run"}`
- return <small className={styles.summary} title={`${details} · Last successful SEO run: ${date(summary.last_success)}`}>{details}</small>
+ return <small className={styles.summary} title={`${details} · Last successful SEO run: ${date(summary.last_success)}`}>SEO</small>
 }
 export let SeoHealth = () => {
  let [workers, setWorkers] = useState<Worker[]>([])

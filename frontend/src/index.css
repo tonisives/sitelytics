@@ -301,7 +301,7 @@ h2 {
 .property-table-controls { display: flex; align-items: center; gap: 8px; }
 
 .property-table-card .prop-table { table-layout: fixed; }
-.property-column-name { width: 360px; }
+.property-column-name { width: 220px; }
 .property-column-search { width: 240px; }
 .property-column-sessions { width: 200px; }
 .property-column-metric { width: 110px; }
