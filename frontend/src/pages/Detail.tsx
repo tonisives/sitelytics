@@ -11,6 +11,7 @@ import { formatNumber, formatTipNumber, formatCtr, formatPosition, formatAxisNum
 import { DayButton } from "../components/DayButton"
 import { ThemeToggle } from "../components/ThemeToggle"
 import { SeoWorkspace } from "../components/seo/SeoWorkspace"
+import settingsStyles from "./WebsiteSettings.module.css"
 
 let GA_METRICS: [string, string, string][] = [
   ["sessions", "Sessions", "var(--chart-teal)"],
@@ -28,6 +29,14 @@ export let Detail = () => {
   let navigate = useNavigate()
 
   let [confirmDelete, setConfirmDelete] = useState(false)
+  let settingsRef = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    let closeOutside = (event: PointerEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) settingsRef.current.open = false
+    }
+    document.addEventListener("pointerdown", closeOutside)
+    return () => document.removeEventListener("pointerdown", closeOutside)
+  }, [])
   let [deleting, setDeleting] = useState(false)
   let [deleteError, setDeleteError] = useState("")
   let deleteWebsite = async () => {
@@ -136,6 +145,22 @@ export let Detail = () => {
             <DayButton days={days} setDays={setDays} value={90} />
           </div>
           <ThemeToggle />
+          <details ref={settingsRef} className={settingsStyles.settings} onKeyDown={(event) => {
+            if (event.key === "Escape" && settingsRef.current) {
+              settingsRef.current.open = false
+              settingsRef.current.querySelector("summary")?.focus()
+            }
+          }}>
+            <summary aria-label="Website settings" title="Website settings">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3h4.5l.75 3 2.25 1.3 3-.85 2.25 3.9-2.25 2.15v2.6l2.25 2.15-2.25 3.9-3-.85L15 21.6l-.75 3h-4.5l-.75-3-2.25-1.3-3 .85-2.25-3.9 2.25-2.15v-2.6L1.5 10.35l2.25-3.9 3 .85L9 6l.75-3Z" transform="translate(2 0) scale(.83)"/><circle cx="12" cy="12" r="3"/></svg>
+            </summary>
+            <div className={settingsStyles.menu}>
+              <button className="text-btn danger" onClick={() => {
+                if (settingsRef.current) settingsRef.current.open = false
+                setConfirmDelete(true)
+              }}>Delete website</button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -144,7 +169,7 @@ export let Detail = () => {
           <p>Delete {cleanUrl(siteUrl)} and all its saved SEO and AI query data? This cannot be undone.</p>
           <button className="text-btn danger" disabled={deleting} onClick={deleteWebsite}>{deleting ? "Deleting…" : "Delete website and data"}</button>
           <button className="text-btn" disabled={deleting} onClick={() => { setConfirmDelete(false); setDeleteError("") }}>Cancel</button>
-        </div> : <button className="text-btn danger" onClick={() => setConfirmDelete(true)}>Delete website</button>}
+        </div> : null}
         {deleteError && <p className="error-text" role="alert">{deleteError}</p>}
       </div>
       <SeoWorkspace key={siteUrl} siteUrl={siteUrl} report={report}><DetailContent

@@ -1,0 +1,9 @@
+.settings { position: relative; }
+.settings summary { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; list-style: none; cursor: pointer; color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.settings summary::-webkit-details-marker { display: none; }
+.settings summary:hover, .settings[open] summary { background: var(--surface-hover); color: var(--text); }
+.settings summary:active { transform: translateY(1px); }
+.settings summary:focus-visible, .menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; min-width: 176px; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-card); }
+.menu button { width: 100%; text-align: left; padding: 8px 12px; border-radius: 4px; }
+.menu button:hover { background: var(--surface-hover); }
