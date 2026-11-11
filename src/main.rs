@@ -51,6 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/auth/logout", axum::routing::post(identity::logout))
         .route("/api/me", axum::routing::get(identity::me))
         .route("/api/gsc/dashboard", axum::routing::get(api_gsc_dashboard))
+        .route("/api/property", axum::routing::delete(api_delete_property))
         .route("/api/gsc/property", axum::routing::get(api_gsc_property))
         .route("/api/gsc/dimension", axum::routing::get(api_gsc_dimension))
         .route("/api/ga/metric", axum::routing::get(api_ga_metric))
@@ -109,7 +110,40 @@ async fn api_gsc_dashboard(
         return (axum::http::StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
     };
     match api::server::fetch_dashboard(&session.access_token, days).await {
-        Ok(data) => Json(data).into_response(),
+        Ok(mut data) => {
+            let removed = match sqlx::query_scalar::<_, String>(
+                "SELECT site_url FROM removed_properties WHERE user_id = $1",
+            )
+            .bind(session.user.id)
+            .fetch_all(&state.db)
+            .await
+            {
+                Ok(rows) => rows,
+                Err(_) => {
+                    return (
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load websites",
+                    )
+                        .into_response();
+                }
+            };
+            data.properties
+                .retain(|property| !removed.contains(&property.site_url));
+            data.totals.clicks = data.properties.iter().map(|p| p.clicks).sum();
+            data.totals.impressions = data.properties.iter().map(|p| p.impressions).sum();
+            data.totals.ctr = if data.totals.impressions > 0.0 {
+                data.totals.clicks / data.totals.impressions
+            } else {
+                0.0
+            };
+            data.totals.position = if data.properties.is_empty() {
+                0.0
+            } else {
+                data.properties.iter().map(|p| p.position).sum::<f64>()
+                    / data.properties.len() as f64
+            };
+            Json(data).into_response()
+        }
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
@@ -118,6 +152,34 @@ async fn api_gsc_dashboard(
 struct PropertyQuery {
     site_url: String,
     days: Option<u64>,
+}
+
+async fn api_delete_property(
+    State(state): State<state::AppState>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<PropertyQuery>,
+) -> Response {
+    let Ok(session) = identity::session(&state, &headers).await else {
+        return (axum::http::StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
+    };
+    let result = async {
+        let mut tx = state.db.begin().await?;
+        sqlx::query("INSERT INTO removed_properties (user_id, site_url) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(session.user.id).bind(&q.site_url).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM aeo_properties WHERE user_id = $1 AND site_url = $2")
+            .bind(session.user.id).bind(&q.site_url).execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM seo_sites WHERE user_id = $1 AND site_url = $2")
+            .bind(session.user.id).bind(&q.site_url).execute(&mut *tx).await?;
+        tx.commit().await
+    }.await;
+    match result {
+        Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
+        Err(_) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete website. Try again.",
+        )
+            .into_response(),
+    }
 }
 
 async fn api_gsc_property(

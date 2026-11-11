@@ -27,6 +27,21 @@ export let Detail = () => {
   let siteUrl = site ? decodeURIComponent(site) : ""
   let navigate = useNavigate()
 
+  let [confirmDelete, setConfirmDelete] = useState(false)
+  let [deleting, setDeleting] = useState(false)
+  let [deleteError, setDeleteError] = useState("")
+  let deleteWebsite = async () => {
+    setDeleting(true)
+    setDeleteError("")
+    try {
+      let response = await fetch(`/api/property?site_url=${encodeURIComponent(siteUrl)}`, { method: "DELETE", credentials: "include" })
+      if (!response.ok) throw new Error("Failed to delete website. Try again.")
+      navigate("/", { replace: true })
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Failed to delete website. Try again.")
+      setDeleting(false)
+    }
+  }
   let [days, setDays] = useState(28)
   let [prop, setProp] = useState<PropertyData | null>(null)
   let [loading, setLoading] = useState(true)
@@ -124,6 +139,14 @@ export let Detail = () => {
         </div>
       </header>
 
+      <div>
+        {confirmDelete ? <div role="group" aria-label="Delete website">
+          <p>Delete {cleanUrl(siteUrl)} and all its saved SEO and AI query data? This cannot be undone.</p>
+          <button className="text-btn danger" disabled={deleting} onClick={deleteWebsite}>{deleting ? "Deleting…" : "Delete website and data"}</button>
+          <button className="text-btn" disabled={deleting} onClick={() => { setConfirmDelete(false); setDeleteError("") }}>Cancel</button>
+        </div> : <button className="text-btn danger" onClick={() => setConfirmDelete(true)}>Delete website</button>}
+        {deleteError && <p className="error-text" role="alert">{deleteError}</p>}
+      </div>
       <SeoWorkspace key={siteUrl} siteUrl={siteUrl} report={report}><DetailContent
         prop={prop}
         siteUrl={siteUrl}
