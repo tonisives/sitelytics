@@ -1,5 +1,6 @@
 mod aeo;
 mod api;
+mod dashboard_cache;
 mod identity;
 mod seo;
 mod state;
@@ -106,27 +107,44 @@ async fn api_gsc_dashboard(
     Query(q): Query<DashboardQuery>,
 ) -> Response {
     let days = q.days.unwrap_or(28);
+    if !matches!(days, 7 | 28 | 90) {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            "days must be 7, 28 or 90",
+        )
+            .into_response();
+    }
+    let session_started = std::time::Instant::now();
     let Ok(session) = identity::session(&state, &headers).await else {
         return (axum::http::StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
     };
-    match api::server::fetch_dashboard(&session.access_token, days).await {
-        Ok(mut data) => {
-            let removed = match sqlx::query_scalar::<_, String>(
-                "SELECT site_url FROM removed_properties WHERE user_id = $1",
+    tracing::info!(
+        elapsed_ms = session_started.elapsed().as_millis() as u64,
+        "GSC dashboard session resolved"
+    );
+    let removed = match sqlx::query_scalar::<_, String>(
+        "SELECT site_url FROM removed_properties WHERE user_id = $1",
+    )
+    .bind(session.user.id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load websites",
             )
-            .bind(session.user.id)
-            .fetch_all(&state.db)
-            .await
-            {
-                Ok(rows) => rows,
-                Err(_) => {
-                    return (
-                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        "Failed to load websites",
-                    )
-                        .into_response();
-                }
-            };
+                .into_response();
+        }
+    };
+    let user_id = session.user.id;
+    let excluded = removed.clone();
+    let fetch = move || async move {
+        api::server::fetch_dashboard(&session.access_token, days, &excluded).await
+    };
+    match state.dashboards.get((user_id, days), fetch).await {
+        Ok(mut data) => {
             data.properties
                 .retain(|property| !removed.contains(&property.site_url));
             data.totals.clicks = data.properties.iter().map(|p| p.clicks).sum();

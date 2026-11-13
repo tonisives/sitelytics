@@ -52,11 +52,15 @@ pub struct DimensionRow {
 
 pub mod server {
     use super::*;
+    use futures_util::{StreamExt, stream};
+    use std::time::{Duration, Instant};
 
     fn http_client() -> &'static reqwest::Client {
         static CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
             reqwest::Client::builder()
-                .pool_max_idle_per_host(5)
+                .pool_max_idle_per_host(6)
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(20))
                 .build()
                 .unwrap_or_default()
         });
@@ -185,11 +189,32 @@ pub mod server {
         (format_epoch_date(start), format_epoch_date(end))
     }
 
-    pub async fn fetch_dashboard(access_token: &str, days: u64) -> Result<DashboardData, String> {
+    pub async fn fetch_dashboard(
+        access_token: &str,
+        days: u64,
+        excluded: &[String],
+    ) -> Result<DashboardData, String> {
+        fetch_dashboard_from(
+            access_token,
+            days,
+            excluded,
+            "https://www.googleapis.com/webmasters/v3",
+        )
+        .await
+    }
+
+    async fn fetch_dashboard_from(
+        access_token: &str,
+        days: u64,
+        excluded: &[String],
+        base: &str,
+    ) -> Result<DashboardData, String> {
+        let started = Instant::now();
+        let sites_started = Instant::now();
         let client = http_client();
 
         let sites_res = client
-            .get("https://www.googleapis.com/webmasters/v3/sites")
+            .get(format!("{base}/sites"))
             .bearer_auth(access_token)
             .send()
             .await
@@ -204,9 +229,22 @@ pub mod server {
         let sites: GscSitesResponse = sites_res.json().await.map_err(|e| e.to_string())?;
         let (start_date, end_date) = date_range(days);
 
-        let mut properties = Vec::new();
-
-        for site in &sites.site_entry {
+        tracing::info!(
+            elapsed_ms = sites_started.elapsed().as_millis() as u64,
+            sites = sites.site_entry.len(),
+            "GSC sites listed"
+        );
+        let active: Vec<_> = sites
+            .site_entry
+            .into_iter()
+            .filter(|site| !excluded.contains(&site.site_url))
+            .collect();
+        let site_count = active.len();
+        let results: Vec<_> = stream::iter(active).map(|site| {
+            let start_date = &start_date;
+            let end_date = &end_date;
+            async move {
+            let site_started = Instant::now();
             let body = serde_json::json!({
                 "startDate": start_date,
                 "endDate": end_date,
@@ -216,7 +254,7 @@ pub mod server {
 
             let analytics_res = client
                 .post(format!(
-                    "https://www.googleapis.com/webmasters/v3/sites/{}/searchAnalytics/query",
+                    "{base}/sites/{}/searchAnalytics/query",
                     urlencoding::encode(&site.site_url)
                 ))
                 .bearer_auth(access_token)
@@ -224,13 +262,20 @@ pub mod server {
                 .send()
                 .await;
 
-            let Ok(res) = analytics_res else { continue };
-            if !res.status().is_success() {
-                continue;
-            }
-            let Ok(data) = res.json::<GscAnalyticsResponse>().await else {
-                continue;
+            let res = match analytics_res {
+                Ok(res) => res,
+                Err(error) => {
+                    tracing::warn!(site = %site.site_url, elapsed_ms = site_started.elapsed().as_millis() as u64, timeout = error.is_timeout(), connect = error.is_connect(), "GSC query transport failed");
+                    return Err("Search Console request failed".to_string());
+                }
             };
+            let status = res.status();
+            if !status.is_success() {
+                tracing::warn!(site = %site.site_url, elapsed_ms = site_started.elapsed().as_millis() as u64, status = status.as_u16(), "GSC query rejected");
+                return Err(format!("Search Console returned HTTP {status}"));
+            }
+            let data = res.json::<GscAnalyticsResponse>().await.map_err(|_| "Invalid Search Console response".to_string())?;
+            tracing::info!(site = %site.site_url, elapsed_ms = site_started.elapsed().as_millis() as u64, rows = data.rows.len(), "GSC query completed");
 
             let total_clicks: f64 = data.rows.iter().map(|r| r.clicks).sum();
             let total_impressions: f64 = data.rows.iter().map(|r| r.impressions).sum();
@@ -265,7 +310,7 @@ pub mod server {
                 })
                 .collect();
 
-            properties.push(PropertyData {
+            Ok(PropertyData {
                 site_url: site.site_url.clone(),
                 permission_level: site.permission_level.clone(),
                 clicks: total_clicks,
@@ -275,8 +320,17 @@ pub mod server {
                 daily,
                 ga_sessions: None,
                 ga_property_id: None,
-            });
-        }
+            })
+            }
+        }).buffer_unordered(6).collect().await;
+        // Do not cache an incomplete dashboard after an upstream failure.
+        let mut properties: Vec<PropertyData> = results.into_iter().collect::<Result<_, _>>()?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            sites = site_count,
+            days,
+            "GSC dashboard fetched"
+        );
 
         properties.sort_by(|a, b| {
             b.impressions
@@ -809,5 +863,71 @@ pub mod server {
             .into_iter()
             .find(|(_, ga_url)| *ga_url == normalized_site)
             .map(|(id, _)| id)
+    }
+    #[cfg(test)]
+    mod dashboard_tests {
+        use super::*;
+        use axum::{
+            Json, Router,
+            extract::{Path, State},
+            routing::{get, post},
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Clone, Default)]
+        struct Requests {
+            active: Arc<AtomicUsize>,
+            maximum: Arc<AtomicUsize>,
+            calls: Arc<AtomicUsize>,
+        }
+
+        async fn sites() -> Json<serde_json::Value> {
+            Json(
+                serde_json::json!({"siteEntry": (0..8).map(|i| serde_json::json!({"siteUrl": format!("sc-domain:site{i}.test"), "permissionLevel": "siteOwner"})).collect::<Vec<_>>()}),
+            )
+        }
+
+        async fn analytics(
+            State(state): State<Requests>,
+            Path(site): Path<String>,
+        ) -> Json<serde_json::Value> {
+            assert_ne!(site, "sc-domain:site0.test");
+            assert_ne!(site, "sc-domain:site1.test");
+            state.calls.fetch_add(1, Ordering::SeqCst);
+            let count = state.active.fetch_add(1, Ordering::SeqCst) + 1;
+            state.maximum.fetch_max(count, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            state.active.fetch_sub(1, Ordering::SeqCst);
+            Json(
+                serde_json::json!({"rows": [{"keys": ["2026-11-01"], "clicks": 2, "impressions": 10, "position": 3}]}),
+            )
+        }
+
+        #[tokio::test]
+        async fn queries_active_properties_concurrently_and_preserves_totals()
+        -> Result<(), Box<dyn std::error::Error>> {
+            let state = Requests::default();
+            let app = Router::new()
+                .route("/sites", get(sites))
+                .route("/sites/{site}/searchAnalytics/query", post(analytics))
+                .with_state(state.clone());
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let base = format!("http://{}", listener.local_addr()?);
+            let server = tokio::spawn(async move { axum::serve(listener, app).await });
+            let excluded = vec!["sc-domain:site0.test".into(), "sc-domain:site1.test".into()];
+            let result = fetch_dashboard_from("test", 28, &excluded, &base).await;
+            server.abort();
+            let dashboard = result.map_err(std::io::Error::other)?;
+            assert_eq!(dashboard.properties.len(), 6);
+            assert_eq!(state.calls.load(Ordering::SeqCst), 6);
+            assert_eq!(state.maximum.load(Ordering::SeqCst), 6);
+            assert_eq!(dashboard.totals.clicks, 12.);
+            assert_eq!(dashboard.totals.impressions, 60.);
+            assert_eq!(dashboard.totals.ctr, 0.2);
+            Ok(())
+        }
     }
 }

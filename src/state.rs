@@ -4,6 +4,7 @@ use sqlx::PgPool;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    pub dashboards: crate::dashboard_cache::DashboardCache,
     pub http: reqwest::Client,
     pub cipher: Aes256Gcm,
     pub app_url: String,
@@ -27,6 +28,7 @@ impl AppState {
 
         Ok(Self {
             db,
+            dashboards: crate::dashboard_cache::DashboardCache::default(),
             http: reqwest::Client::new(),
             cipher: Aes256Gcm::new_from_slice(&encryption_key)
                 .map_err(|error| error.to_string())?,

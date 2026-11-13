@@ -250,6 +250,7 @@ pub async fn access_token_for_user(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let refresh =
         decrypt(&state.cipher, &encrypted, &nonce).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let refresh_started = std::time::Instant::now();
     let refreshed: RefreshResponse = state
         .http
         .post("https://oauth2.googleapis.com/token")
@@ -265,6 +266,10 @@ pub async fn access_token_for_user(
         .json()
         .await
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    tracing::info!(
+        elapsed_ms = refresh_started.elapsed().as_millis() as u64,
+        "Google OAuth token refreshed"
+    );
     sqlx::query("UPDATE oauth_credentials SET access_token=$2,access_token_expires_at=$3,updated_at=now() WHERE user_id=$1")
         .bind(user_id).bind(&refreshed.access_token).bind(Utc::now() + Duration::seconds(refreshed.expires_in))
         .execute(&state.db).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

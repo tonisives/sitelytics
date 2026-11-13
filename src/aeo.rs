@@ -105,7 +105,7 @@ pub async fn put_property(
         )
             .into_response();
     }
-    let owns_property = crate::api::server::fetch_dashboard(&session.access_token, 1)
+    let owns_property = crate::api::server::fetch_dashboard(&session.access_token, 1, &[])
         .await
         .is_ok_and(|dashboard| {
             dashboard
